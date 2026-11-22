@@ -20,9 +20,9 @@
     "productName": "Cordial",
     "directories": { "buildResources": "assets", "output": "dist" },
     "files": ["main.js", "preload.js", "setup.html", "setup.js", "offline.html", "offline.js", "config.json", "assets/**"],
-    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "artifactName": "Cordial-Setup-${version}.${ext}" },
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "artifactName": "Cordial-Setup.${ext}" },
     "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true, "language": "1036", "shortcutName": "Cordial" },
-    "mac": { "target": ["dmg"], "category": "public.app-category.social-networking", "artifactName": "Cordial-${version}.${ext}", "extendInfo": { "NSMicrophoneUsageDescription": "Cordial utilise le micro pour les salons vocaux." } },
-    "linux": { "target": ["AppImage"], "category": "Network", "artifactName": "Cordial-${version}.${ext}" }
+    "mac": { "target": ["dmg"], "category": "public.app-category.social-networking", "artifactName": "Cordial.${ext}", "extendInfo": { "NSMicrophoneUsageDescription": "Cordial utilise le micro pour les salons vocaux." } },
+    "linux": { "target": ["AppImage"], "category": "Network", "artifactName": "Cordial.${ext}" }
   }
 }

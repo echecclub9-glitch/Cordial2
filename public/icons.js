@@ -32,6 +32,10 @@
     user: S('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'),
     shield: S('<path d="M12 3 4.5 6v5.500c0 4.7 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.8 7.5-9.500V6z"/>'),
     power: S('<path d="M12 3v8.500"/><path d="M6.500 6.500a8 8 0 1 0 11 0"/>'),
+    play: S('<path d="M7 4.500v15l12-7.500z"/>'),
+    pause: S('<path d="M8 5v14M16 5v14"/>'),
+    video: S('<rect x="2.500" y="6" width="13" height="12" rx="2"/><path d="m15.500 10.500 6-3.500v10l-6-3.500"/>'),
+    "video-off": S('<path d="M15.500 14.500V8a2 2 0 0 0-2-2H8M2.500 8v8a2 2 0 0 0 2 2h9"/><path d="m15.500 10.500 6-3.500v10l-3-1.700"/><path d="M4 4l16 16"/>'),
     x: S('<path d="M6 6l12 12M18 6 6 18"/>'),
   };
   window.IC = IC;

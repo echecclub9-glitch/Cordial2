@@ -22,7 +22,8 @@ Variables optionnelles :
 | `TRUST_PROXY` | mettre `1` derrière Nginx ou Caddy |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | clés des notifications push (générées et conservées automatiquement si absentes) |
 | `ICE_SERVERS` | serveurs STUN/TURN du vocal, en JSON (défaut : STUN Google) |
-| `DESKTOP_DOWNLOAD_URL` | lien du installeur Windows, affiche le bouton sur la page d'accueil |
+| `GITHUB_REPO` | `compte/depot` GitHub : la page d'accueil propose les installeurs Windows, macOS et Linux de la dernière release |
+| `DESKTOP_DOWNLOAD_URL` | lien personnalisé de l'installeur Windows (prioritaire sur `GITHUB_REPO`) |
 
 ## Fonctionnalités
 
@@ -41,6 +42,8 @@ Variables optionnelles :
 - Rôle **modérateur** : supprime des messages, suspend des comptes, traite les signalements, sans accès au reste du panneau
 - Notifications push réelles (messages privés, mentions, réponses), même application fermée
 - Salons vocaux (WebRTC, 6 personnes max) avec **partage d'écran** : bouton 🖥 dans la barre vocale, image et son de l'onglet, 2 partages simultanés maximum, plein écran. Dans l'appli Windows, un sélecteur propose écrans et fenêtres (le son du système n'est partagé que sous Windows). Le partage passe de navigateur à navigateur : avec 5 spectateurs, votre connexion en envoi doit suivre (environ 2,5 Mbit/s par spectateur)
+- **Messages vocaux** : bouton micro dans la zone de saisie, 2 minutes maximum, lecteur avec progression et vitesse ×1 / ×1,5 / ×2 (nécessite HTTPS et un micro)
+- **Caméra** dans les salons vocaux (bouton 🎥 de la barre vocale), utilisable en même temps que le partage d'écran ; l'image passe de navigateur à navigateur (environ 0,7 Mbit/s par spectateur)
 - Bot **Cordibot** : `/aide`, `/de`, `/pile`, `/choix a|b|c`, `/sondage Question|Option 1|Option 2`
 
 ## Vocal et notifications : à savoir

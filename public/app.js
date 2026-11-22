@@ -131,7 +131,7 @@
     sock.on("voiceRoster", (d) => { const s = S.servers.find((x) => x.id === d.serverId), c = s && s.channels.find((x) => x.id === d.channelId); if (c) { c.voice = d.users; renderSide(); } });
     sock.on("voicePeerJoined", (d) => { if (V.cid === d.channelId && V.stream) makePeer(d.socketId, d.user, false); });
     sock.on("voicePeerLeft", (d) => dropPeer(d.socketId));
-    sock.on("voicePeerState", (d) => { if (d.screen === false) removeTile(d.socketId); });
+    sock.on("voicePeerState", (d) => onPeerVideo(d.socketId, d));
     sock.on("voiceSignal", onSignal);
     sock.on("voiceEnded", (d) => { if (V.cid === d.channelId) { leaveVoice(true); toast("Le salon vocal a été supprimé."); } });
   }
@@ -268,7 +268,7 @@
         box.appendChild(row);
         if (voice && c.voice && c.voice.length) {
           const vu = el("div", "vusers");
-          c.voice.forEach((u2) => { const r = el("div", "vu"); r.dataset.uid = u2.id; r.appendChild(avatar(u2)); r.appendChild(el("span", "n", u2.name)); if (u2.screen) r.appendChild(el("span", "live", "EN DIRECT")); if (u2.muted) r.appendChild(el("span", "mu", "🔇")); vu.appendChild(r); });
+          c.voice.forEach((u2) => { const r = el("div", "vu"); r.dataset.uid = u2.id; r.appendChild(avatar(u2)); r.appendChild(el("span", "n", u2.name)); if (u2.cam) { const cm = icText(el("span", "camic"), "video"); cm.title = "Caméra allumée"; r.appendChild(cm); } if (u2.screen) r.appendChild(el("span", "live", "EN DIRECT")); if (u2.muted) r.appendChild(el("span", "mu", "🔇")); vu.appendChild(r); });
           box.appendChild(vu);
         }
       });
@@ -305,7 +305,7 @@
   function updateComposer() {
     const c = channel(), inp = $("inp"), box = $("form");
     const ro = !c || (c.readonly && !privileged());
-    inp.disabled = ro; box.classList.toggle("off", ro);
+    inp.disabled = ro; box.classList.toggle("off", ro); $("bMic").disabled = ro;
     const left = c && S.cool[c.id] ? Math.ceil((S.cool[c.id] - Date.now()) / 1000) : 0;
     inp.placeholder = !c ? "" : c.readonly && !privileged() ? "Ce salon est en lecture seule." : left > 0 ? "Mode lent : encore " + left + " s" : "Envoyer un message " + (c.kind === "dm" ? "à " + c.name : "dans #" + c.name);
   }
@@ -327,10 +327,29 @@
   function fileNode(f) {
     const w = el("div", "att"), url = "/files/" + f.id;
     if (f.mime.startsWith("image/")) { const a = el("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; const i = el("img"); i.src = url; i.alt = f.name; i.loading = "lazy"; a.appendChild(i); w.appendChild(a); }
+    else if (f.mime.startsWith("audio/") && /^vocal-\d+\./.test(f.name)) w.appendChild(voicePlayer(url, Number(f.name.match(/^vocal-(\d+)/)[1])));
     else if (f.mime.startsWith("audio/")) { const a = el("audio"); a.controls = true; a.preload = "none"; a.src = url; w.appendChild(a); }
     else if (f.mime.startsWith("video/")) { const v = el("video"); v.controls = true; v.preload = "metadata"; v.src = url; w.appendChild(v); }
     else { const a = el("a", "chip"); a.href = url + "?dl=1"; a.setAttribute("download", f.name); { const sp = el("span"); icText(sp, "paperclip", f.name); a.appendChild(sp); } a.appendChild(el("small", "", fmtSize(f.size))); w.appendChild(a); }
     return w;
+  }
+  const clock = (n) => Math.floor(n / 60) + ":" + String(Math.floor(n % 60)).padStart(2, "0");
+  // Lecteur de message vocal : lecture/pause, progression, vitesse. La durée vient du nom du fichier (les enregistrements du navigateur n'en portent pas)
+  function voicePlayer(url, secs) {
+    const w = el("div", "vm"), btn = el("button", "vplay"), track = el("div", "vtrack"), fill = el("i"), tm = el("span", "vtime", clock(secs)), sp = el("button", "vspeed", "1×");
+    btn.type = sp.type = "button"; btn.innerHTML = ic("play"); btn.setAttribute("aria-label", "Écouter le message vocal"); sp.title = "Vitesse de lecture"; track.appendChild(fill);
+    const a = new Audio(); a.preload = "none"; a.src = url; let speeds = [1, 1.5, 2], si = 0;
+    const total = () => (isFinite(a.duration) && a.duration > 0 ? a.duration : secs) || 1;
+    btn.onclick = () => {
+      if (a.paused) { (window.__vm && window.__vm !== a) && window.__vm.pause(); window.__vm = a; a.play().catch(() => toast("Lecture impossible.")); } else a.pause();
+    };
+    a.onplay = () => { btn.innerHTML = ic("pause"); btn.setAttribute("aria-label", "Mettre en pause"); };
+    a.onpause = () => { btn.innerHTML = ic("play"); btn.setAttribute("aria-label", "Écouter le message vocal"); };
+    a.ontimeupdate = () => { fill.style.width = Math.min(100, (a.currentTime / total()) * 100) + "%"; tm.textContent = clock(a.currentTime); };
+    a.onended = () => { fill.style.width = "0"; tm.textContent = clock(secs); a.currentTime = 0; };
+    sp.onclick = () => { si = (si + 1) % speeds.length; a.playbackRate = speeds[si]; sp.textContent = speeds[si] + "×"; };
+    track.onclick = (e) => { const r = track.getBoundingClientRect(); if (a.readyState > 0 && isFinite(a.duration)) a.currentTime = ((e.clientX - r.left) / r.width) * a.duration; };
+    w.append(btn, track, tm, sp); return w;
   }
   function msgNode(m, prev, compact) {
     const mine = m.user.id === S.me.id, meTag = "@" + S.me.name.toLowerCase();
@@ -482,7 +501,7 @@
   function pickCmd(x) { if (!x) return; $("inp").value = x.c + " "; hideCmds(); $("inp").focus(); }
 
   function clearFile() { S.pending = null; $("fileBar").hidden = true; $("fileInput").value = ""; }
-  function pickFile(file) {
+  function pickFile(file, autoSend) {
     if (!file) return;
     if (!channel()) return toast("Ouvrez d'abord un salon.");
     if (file.size > 8 * 1024 * 1024) return toast("Fichier trop volumineux (8 Mo maximum).");
@@ -494,12 +513,42 @@
     x.onload = () => {
       if (S.pending !== p) return;
       let d = {}; try { d = JSON.parse(x.responseText); } catch (e) { /* réponse non JSON */ }
-      if (x.status === 200 && d.id) { p.id = d.id; p.uploading = false; $("fileProg").textContent = "Prêt"; $("inp").focus(); }
+      if (x.status === 200 && d.id) { p.id = d.id; p.uploading = false; $("fileProg").textContent = "Prêt"; if (autoSend) send(); else $("inp").focus(); }
       else { toast(d.error || "L'envoi du fichier a échoué."); clearFile(); }
     };
     x.onerror = () => { if (S.pending === p) { toast("L'envoi du fichier a échoué."); clearFile(); } };
     x.send(file);
   }
+  /* ---------- Messages vocaux ---------- */
+  const REC = { rec: null };
+  async function startRecording() {
+    if (REC.rec) return;
+    const c = channel(); if (!c) return toast("Ouvrez d'abord un salon.");
+    if (!navigator.mediaDevices || !window.MediaRecorder || !window.isSecureContext) return toast("Les messages vocaux demandent HTTPS, un micro et un navigateur récent.");
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); } catch (e) { return toast("Micro inaccessible : autorisez-le dans votre navigateur."); }
+    const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"].find((m) => MediaRecorder.isTypeSupported(m)) || "";
+    const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined), chunks = [], r = { mr, stream, cid: c.id, t0: Date.now(), send: false, timer: null };
+    mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    mr.onstop = () => {
+      clearInterval(r.timer); stream.getTracks().forEach((t) => t.stop()); REC.rec = null; $("recBar").hidden = true; $("form").hidden = false;
+      const secs = Math.max(1, Math.round((Date.now() - r.t0) / 1000));
+      if (!r.send || !chunks.length) return;
+      const type = mr.mimeType || mime || "audio/webm", ext = /mp4/.test(type) ? "m4a" : /ogg/.test(type) ? "ogg" : "weba";
+      const channelNow = channel(); if (!channelNow || channelNow.id !== r.cid) return toast("Enregistrement annulé : vous avez changé de salon.");
+      pickFile(new File(chunks, "vocal-" + secs + "." + ext, { type }), true);
+    };
+    REC.rec = r; mr.start(250);
+    $("form").hidden = true; $("recBar").hidden = false; $("recTime").textContent = "0:00";
+    const bars = $("recBars"); bars.innerHTML = ""; for (let i = 0; i < 24; i++) bars.appendChild(el("i")); const an = analyserFor(stream);
+    r.timer = setInterval(() => {
+      const s = (Date.now() - r.t0) / 1000; $("recTime").textContent = clock(s);
+      const lv = Math.min(1, level(an) / 60); [...bars.children].forEach((b, i, all) => { b.style.height = (i === all.length - 1 ? 4 + lv * 22 : parseFloat(all[i + 1].style.height) || 4) + "px"; });
+      const cc = channel(); if (!cc || cc.id !== r.cid) stopRecording(false);
+      else if (s >= 120) { toast("Durée maximale atteinte (2 min) : envoi."); stopRecording(true); }
+    }, 120);
+  }
+  function stopRecording(send) { const r = REC.rec; if (!r) return; r.send = send; if (send && Date.now() - r.t0 < 800) { r.send = false; toast("Message trop court."); } try { r.mr.stop(); } catch (e) { r.send = false; r.stream.getTracks().forEach((t) => t.stop()); REC.rec = null; $("recBar").hidden = true; $("form").hidden = false; } }
+  $("bMic").onclick = startRecording; $("recSend").onclick = () => stopRecording(true); $("recCancel").onclick = () => stopRecording(false);
   $("bAttach").onclick = () => $("fileInput").click();
   $("fileInput").onchange = () => pickFile($("fileInput").files[0]);
   $("fileCancel").onclick = () => { if (S.pending && S.pending.xhr) S.pending.xhr.abort(); clearFile(); };
@@ -842,7 +891,8 @@
     const peers = [...V.peers.values()], st = peers.some((x) => x.state === "failed") ? "failed" : !peers.length || peers.every((x) => x.state === "connected") ? "connected" : "connecting";
     p.dataset.state = st; $("vState").textContent = st === "failed" ? "Connexion impossible" : st === "connecting" ? "Connexion…" : "Vocal connecté";
     const sh = $("vShare"); sh.hidden = !(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && !(window.cordialDesktop && window.cordialDesktop.screenSources);
-    sh.innerHTML = ic(V.screen ? "screen-off" : "screen-share"); sh.classList.toggle("on", !!V.screen); sh.title = sh.ariaLabel = V.screen ? "Arrêter le partage d'écran" : "Partager l'écran";
+    sh.innerHTML = ic(V.screen ? "screen-off" : "screen-share"); sh.classList.toggle("on", !!V.screen);
+    const cb = $("vCam"); cb.hidden = !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); cb.innerHTML = ic(V.cam ? "video-off" : "video"); cb.classList.toggle("on", !!V.cam); cb.title = cb.ariaLabel = V.cam ? "Couper la caméra" : "Activer la caméra"; sh.title = sh.ariaLabel = V.screen ? "Arrêter le partage d'écran" : "Partager l'écran";
     const mb = $("vMute"); mb.innerHTML = ic(V.muted ? "mic-off" : "mic"); mb.classList.toggle("off", V.muted); mb.title = mb.ariaLabel = V.muted ? "Réactiver le micro" : "Couper le micro";
   }
   async function joinVoice(c) {
@@ -855,7 +905,7 @@
     S.sock.emit("voiceJoin", { channelId: c.id }, (r) => {
       if (!r || r.error) { stream.getTracks().forEach((t) => t.stop()); return toast(r ? r.error : "Erreur de connexion."); }
       V.cid = c.id; V.sid = S.sid; V.stream = stream; V.muted = false; V.ice = r.ice || S.ice;
-      r.peers.forEach((p) => makePeer(p.socketId, p.user, true));
+      r.peers.forEach((p) => { makePeer(p.socketId, p.user, true); const pe = V.peers.get(p.socketId); if (pe) pe.vid = { screenId: p.screen ? p.screenId : null, camId: p.cam ? p.camId : null }; });
       startMonitor(); renderSide();
     });
   }
@@ -863,14 +913,14 @@
     if (V.peers.has(id)) return;
     const pc = new RTCPeerConnection({ iceServers: V.ice });
     // « Négociation parfaite » : en cas de double proposition simultanée, la personne « polie » cède
-    const peer = { pc, user, audio: null, analyser: null, queue: [], state: "connecting", live: false, making: false, polite: (S.sock.id || "") < id, senders: [] };
+    const peer = { pc, user, audio: null, analyser: null, queue: [], state: "connecting", live: false, making: false, polite: (S.sock.id || "") < id, snd: { screen: [], cam: [] }, vid: { screenId: null, camId: null } };
     V.peers.set(id, peer);
     V.stream.getTracks().forEach((t) => pc.addTrack(t, V.stream));
-    if (V.screen) addScreenTo(peer);
+    if (V.screen) addVideoTo(peer, "screen"); if (V.cam) addVideoTo(peer, "cam");
     pc.onicecandidate = (e) => { if (e.candidate) S.sock.emit("voiceSignal", { to: id, data: { candidate: e.candidate } }); };
     pc.ontrack = (e) => {
       const st = e.streams[0]; if (!st) return;
-      if (e.track.kind === "video" || (e.track.kind === "audio" && peer.audio && st !== peer.audio.srcObject)) { showTile(id, user, st); return; } // écran partagé (image et son)
+      if (e.track.kind === "video" || (e.track.kind === "audio" && peer.audio && st !== peer.audio.srcObject)) { showTile(id + "|" + st.id, id, user, st); return; } // écran partagé ou caméra (image, et son de l'écran)
       if (peer.audio) return;
       const a = el("audio"); a.autoplay = true; a.setAttribute("playsinline", ""); a.srcObject = st; $("audioBox").appendChild(a); peer.audio = a; a.play().catch(() => {});
       peer.analyser = analyserFor(st);
@@ -878,7 +928,7 @@
     pc.onconnectionstatechange = () => { peer.state = pc.connectionState; renderVoicePanel(); };
     pc.onsignalingstatechange = () => {
       if (pc.signalingState !== "stable" || peer.live) return;
-      peer.live = true; if (peer.senders.length) offer(id, peer); // un partage commencé avant la fin de la première négociation
+      peer.live = true; if (peer.snd.screen.length || peer.snd.cam.length) offer(id, peer); // un partage commencé avant la fin de la première négociation
     };
     pc.onnegotiationneeded = () => { if (peer.live) offer(id, peer); };
     if (initiator) pc.createOffer().then((o) => pc.setLocalDescription(o)).then(() => S.sock.emit("voiceSignal", { to: id, data: { sdp: pc.localDescription } })).catch(() => { peer.state = "failed"; renderVoicePanel(); });
@@ -910,21 +960,40 @@
   }
   /* ---------- Partage d'écran ---------- */
   function renderStage() { $("stage").hidden = !$("stage").children.length; }
-  function showTile(key, user, stream) {
+  // Une vignette par flux vidéo, identifiée par « pair|flux » ; la légende dit s'il s'agit d'un écran ou d'une caméra
+  const tileLabel = (t) => {
+    if (t.peerId === "me") return t.kind === "cam" ? "Votre caméra" : "Votre écran";
+    const v = (V.peers.get(t.peerId) || {}).vid || {}, k = t.streamId === v.camId ? "cam" : t.streamId === v.screenId ? "screen" : null;
+    return (k === "cam" ? "Caméra de " : k === "screen" ? "Écran de " : "Vidéo de ") + t.user.name;
+  };
+  function showTile(key, peerId, user, stream, kind) {
     let t = V.tiles.get(key);
     if (!t) {
-      const box = el("div", "tile"), v = el("video"); v.autoplay = true; v.playsInline = true; v.setAttribute("playsinline", ""); if (key === "me") v.muted = true;
-      const cap = el("span", "cap", key === "me" ? "Votre écran" : "Écran de " + user.name), fs = icText(el("button", "full"), "maximize"); fs.type = "button"; fs.title = "Plein écran"; fs.setAttribute("aria-label", "Plein écran");
+      const box = el("div", "tile"), v = el("video"); v.autoplay = true; v.playsInline = true; v.setAttribute("playsinline", ""); if (peerId === "me") v.muted = true;
+      const cap = el("span", "cap"), fs = icText(el("button", "full"), "maximize"); fs.type = "button"; fs.title = "Plein écran"; fs.setAttribute("aria-label", "Plein écran");
       fs.onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else (box.requestFullscreen || v.requestFullscreen).call(box).catch(() => {}); };
-      box.append(v, cap, fs); $("stage").appendChild(box); t = { box, v }; V.tiles.set(key, t);
+      if (peerId === "me" && kind === "cam") box.classList.add("mirror");
+      box.append(v, cap, fs); $("stage").appendChild(box); t = { box, v, cap, peerId, user, streamId: stream.id, kind }; V.tiles.set(key, t);
     }
+    t.cap.textContent = tileLabel(t); t.box.classList.toggle("cam", t.cap.textContent.startsWith("Cam") || t.cap.textContent.startsWith("Votre cam"));
     if (t.v.srcObject !== stream) t.v.srcObject = stream; t.v.play().catch(() => {}); renderStage();
   }
   function removeTile(key) { const t = V.tiles.get(key); if (!t) return; t.v.srcObject = null; t.box.remove(); V.tiles.delete(key); renderStage(); }
-  function addScreenTo(peer) {
-    V.screen.getTracks().forEach((t) => {
-      if (t.kind === "video") { try { peer.senders.push(peer.pc.addTransceiver(t, { direction: "sendonly", streams: [V.screen], sendEncodings: [{ maxBitrate: 2500000 }] }).sender); return; } catch (e) { /* ancien navigateur */ } }
-      peer.senders.push(peer.pc.addTrack(t, V.screen));
+  // Un correspondant annonce ce qu'il envoie : on met les légendes à jour et on retire ce qui n'est plus diffusé
+  function onPeerVideo(id, d) {
+    const peer = V.peers.get(id); if (!peer) return;
+    peer.vid = { screenId: d.screen ? d.screenId : null, camId: d.cam ? d.camId : null };
+    [...V.tiles.entries()].forEach(([key, t]) => {
+      if (t.peerId !== id) return;
+      if (t.streamId !== peer.vid.screenId && t.streamId !== peer.vid.camId) removeTile(key);
+      else { t.cap.textContent = tileLabel(t); t.box.classList.toggle("cam", t.streamId === peer.vid.camId); }
+    });
+  }
+  function addVideoTo(peer, kind) {
+    const st = kind === "cam" ? V.cam : V.screen, rate = kind === "cam" ? 700000 : 2500000;
+    st.getTracks().forEach((t) => {
+      if (t.kind === "video") { try { peer.snd[kind].push(peer.pc.addTransceiver(t, { direction: "sendonly", streams: [st], sendEncodings: [{ maxBitrate: rate }] }).sender); return; } catch (e) { /* ancien navigateur */ } }
+      peer.snd[kind].push(peer.pc.addTrack(t, st));
     });
   }
   // Sous Electron, la page demande d'abord à l'application quelle fenêtre ou quel écran partager
@@ -945,27 +1014,41 @@
     let st;
     try { st = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 }, width: { max: 1920 }, height: { max: 1080 } }, audio: true }); }
     catch (e) { return toast("Partage annulé ou refusé."); }
-    S.sock.emit("voiceScreen", { on: true }, (r) => {
+    S.sock.emit("voiceScreen", { on: true, streamId: st.id }, (r) => {
       if (!r || r.error || !V.cid) { st.getTracks().forEach((t) => t.stop()); return toast(r && r.error ? r.error : "Partage impossible."); }
       V.screen = st; const vt = st.getVideoTracks()[0]; if (vt) { try { vt.contentHint = "detail"; } catch (e) {} vt.onended = () => stopShare(); }
-      V.peers.forEach(addScreenTo); showTile("me", S.me, st); renderVoicePanel();
+      V.peers.forEach((p) => addVideoTo(p, "screen")); showTile("me|screen", "me", S.me, st, "screen"); renderVoicePanel();
     });
   }
-  function stopShare(silent) {
-    if (!V.screen) return;
-    const st = V.screen; V.screen = null; st.getTracks().forEach((t) => { t.onended = null; t.stop(); });
-    V.peers.forEach((p) => { p.senders.forEach((snd) => { try { p.pc.removeTrack(snd); } catch (e) { /* déjà retiré */ } }); p.senders = []; });
-    removeTile("me"); if (!silent && S.sock && S.sock.connected) S.sock.emit("voiceScreen", { on: false }, () => {}); renderVoicePanel();
+  function stopVideo(kind, silent) {
+    const st = kind === "cam" ? V.cam : V.screen; if (!st) return;
+    if (kind === "cam") V.cam = null; else V.screen = null;
+    st.getTracks().forEach((t) => { t.onended = null; t.stop(); });
+    V.peers.forEach((p) => { p.snd[kind].forEach((snd) => { try { p.pc.removeTrack(snd); } catch (e) { /* déjà retiré */ } }); p.snd[kind] = []; });
+    removeTile("me|" + kind); if (!silent && S.sock && S.sock.connected) S.sock.emit(kind === "cam" ? "voiceCam" : "voiceScreen", { on: false }, () => {}); renderVoicePanel();
   }
+  const stopShare = (silent) => stopVideo("screen", silent), stopCam = (silent) => stopVideo("cam", silent);
+  async function startCam() {
+    if (!V.cid || V.cam) return;
+    let st;
+    try { st = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 24 } }, audio: false }); }
+    catch (e) { return toast(e && e.name === "NotFoundError" ? "Aucune caméra détectée." : "Caméra inaccessible : autorisez-la dans votre navigateur."); }
+    S.sock.emit("voiceCam", { on: true, streamId: st.id }, (r) => {
+      if (!r || r.error || !V.cid) { st.getTracks().forEach((t) => t.stop()); return toast(r && r.error ? r.error : "Caméra impossible."); }
+      V.cam = st; const vt = st.getVideoTracks()[0]; if (vt) vt.onended = () => stopCam();
+      V.peers.forEach((p) => addVideoTo(p, "cam")); showTile("me|cam", "me", S.me, st, "cam"); renderVoicePanel();
+    });
+  }
+  $("vCam").onclick = () => (V.cam ? stopCam() : startCam());
   $("vShare").onclick = () => (V.screen ? stopShare() : startShare());
   function dropPeer(id) {
     const p = V.peers.get(id); if (!p) return;
-    try { p.pc.close(); } catch (e) { /* déjà fermée */ } if (p.audio) p.audio.remove(); removeTile(id); V.peers.delete(id); renderVoicePanel();
+    try { p.pc.close(); } catch (e) { /* déjà fermée */ } if (p.audio) p.audio.remove(); [...V.tiles.keys()].filter((k) => k.startsWith(id + "|")).forEach(removeTile); V.peers.delete(id); renderVoicePanel();
   }
   function leaveVoice(silent) {
     if (!V.cid) return;
     if (!silent && S.sock && S.sock.connected) S.sock.emit("voiceLeave");
-    stopShare(true); [...V.peers.keys()].forEach(dropPeer);
+    stopShare(true); stopCam(true); [...V.peers.keys()].forEach(dropPeer);
     if (V.stream) V.stream.getTracks().forEach((t) => t.stop());
     clearInterval(V.timer); if (V.ctx) { V.ctx.close().catch(() => {}); V.ctx = null; }
     V.cid = null; V.sid = null; V.stream = null; V.local = null; V.muted = false; renderVoicePanel(); renderSide();

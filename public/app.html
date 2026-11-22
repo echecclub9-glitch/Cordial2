@@ -46,6 +46,7 @@
     <div class="vpanel" id="vpanel" hidden>
       <div class="vinfo"><span class="vdot"></span><div><div class="vstate" id="vState">Vocal connecté</div><div class="vname" id="vName"></div></div></div>
       <div class="vbtns">
+        <button class="icn" id="vCam" title="Activer la caméra" aria-label="Activer la caméra" hidden><i data-ic="video"></i></button>
         <button class="icn" id="vShare" title="Partager l'écran" aria-label="Partager l'écran" hidden><i data-ic="screen-share"></i></button>
         <button class="icn" id="vMute" title="Couper le micro" aria-label="Couper le micro"><i data-ic="mic"></i></button>
         <button class="icn danger" id="vLeave" title="Quitter le vocal" aria-label="Quitter le vocal"><i data-ic="phone-off"></i></button>
@@ -88,11 +89,18 @@
       <div class="strip" id="fileBar" hidden><span id="fileName"></span><span class="prog" id="fileProg"></span><button class="mini" id="fileCancel" aria-label="Retirer le fichier">✕</button></div>
       <form class="box" id="form" autocomplete="off">
         <button type="button" id="bAttach" title="Joindre un fichier" aria-label="Joindre un fichier"><i data-ic="paperclip"></i></button>
-        <input type="file" id="fileInput" hidden accept=".png,.jpg,.jpeg,.gif,.webp,.mp3,.ogg,.wav,.mp4,.webm,.pdf,.zip,.txt">
+        <input type="file" id="fileInput" hidden accept=".png,.jpg,.jpeg,.gif,.webp,.mp3,.ogg,.wav,.mp4,.webm,.weba,.m4a,.pdf,.zip,.txt">
         <input id="inp" type="text" maxlength="2000" aria-label="Message" autocomplete="off">
         <button type="button" id="bEmo" aria-label="Emojis"><i data-ic="smile"></i></button>
+        <button type="button" id="bMic" title="Message vocal" aria-label="Enregistrer un message vocal"><i data-ic="mic"></i></button>
         <button type="submit" class="go" aria-label="Envoyer">➤</button>
       </form>
+      <div class="box rec" id="recBar" hidden role="group" aria-label="Enregistrement du message vocal">
+        <button type="button" id="recCancel" title="Annuler" aria-label="Annuler l'enregistrement"><i data-ic="trash"></i></button>
+        <span class="recdot"></span><span class="rectime" id="recTime">0:00</span>
+        <span class="recbars" id="recBars" aria-hidden="true"></span>
+        <button type="button" class="go" id="recSend" title="Envoyer le message vocal" aria-label="Envoyer le message vocal">➤</button>
+      </div>
     </div>
   </main>
 

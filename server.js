@@ -316,6 +316,8 @@ const FILE_TYPES = {
   ogg: { mime: "audio/ogg", inline: true, ok: (b) => at(b, 0, "OggS") },
   wav: { mime: "audio/wav", inline: true, ok: (b) => at(b, 0, "RIFF") && at(b, 8, "WAVE") },
   mp4: { mime: "video/mp4", inline: true, ok: (b) => at(b, 4, "ftyp") },
+  weba: { mime: "audio/webm", inline: true, ok: (b) => startsWith(b, 0x1a, 0x45, 0xdf, 0xa3) }, // messages vocaux (Chrome, Edge, Firefox)
+  m4a: { mime: "audio/mp4", inline: true, ok: (b) => at(b, 4, "ftyp") }, // messages vocaux (Safari)
   webm: { mime: "video/webm", inline: true, ok: (b) => startsWith(b, 0x1a, 0x45, 0xdf, 0xa3) },
   pdf: { mime: "application/pdf", inline: false, ok: (b) => at(b, 0, "%PDF") },
   zip: { mime: "application/zip", inline: false, ok: (b) => at(b, 0, "PK\x03\x04") },
@@ -426,7 +428,13 @@ if (!VAPID.publicKey || !VAPID.privateKey) {
 }
 webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:admin@localhost.invalid", VAPID.publicKey, VAPID.privateKey);
 
-app.get("/api/config", (req, res) => res.json({ app: "cordial", desktopUrl: process.env.DESKTOP_DOWNLOAD_URL || null }));
+// Liens de téléchargement des applications de bureau : GITHUB_REPO=compte/depot pointe vers la dernière « release » (noms de fichiers fixes)
+app.get("/api/config", (req, res) => {
+  const repo = /^[\w.-]+\/[\w.-]+$/.test(process.env.GITHUB_REPO || "") ? process.env.GITHUB_REPO : null, base = repo ? "https://github.com/" + repo + "/releases/latest/download/" : null;
+  const downloads = base ? { windows: base + "Cordial-Setup.exe", mac: base + "Cordial.dmg", linux: base + "Cordial.AppImage" } : {};
+  if (process.env.DESKTOP_DOWNLOAD_URL) downloads.windows = process.env.DESKTOP_DOWNLOAD_URL;
+  res.json({ app: "cordial", desktopUrl: downloads.windows || null, downloads });
+});
 app.get("/api/push/key", (req, res) => res.json({ key: VAPID.publicKey }));
 app.post("/api/push/subscribe", (req, res) => {
   const user = authBearer(req), s = req.body && req.body.subscription;
@@ -472,7 +480,7 @@ function serverView(s) {
 }
 function rosterOf(channelId) {
   const room = voiceRooms.get(channelId);
-  return room ? [...room.values()].map((p) => ({ ...p.user, muted: p.muted, screen: !!p.screen })) : [];
+  return room ? [...room.values()].map((p) => ({ ...p.user, muted: p.muted, screen: !!p.screen, cam: !!p.cam })) : [];
 }
 function broadcastRoster(c) {
   io.to("srv:" + c.server_id).emit("voiceRoster", { serverId: c.server_id, channelId: c.id, users: rosterOf(c.id) });
@@ -970,8 +978,8 @@ io.on("connection", (socket) => {
     leaveVoice();
     const room = voiceRooms.get(c.id) || new Map();
     if (room.size >= MAX_VOICE) return ack({ error: "Salon vocal plein (" + MAX_VOICE + " personnes maximum)." });
-    const peers = [...room.entries()].map(([sid, p]) => ({ socketId: sid, user: p.user, muted: p.muted, screen: !!p.screen }));
-    room.set(socket.id, { user: pub(user), muted: false, screen: false }); voiceRooms.set(c.id, room); voiceChan = c.id;
+    const peers = [...room.entries()].map(([sid, p]) => ({ socketId: sid, user: p.user, muted: p.muted, screen: !!p.screen, cam: !!p.cam, screenId: p.screenId || null, camId: p.camId || null }));
+    room.set(socket.id, { user: pub(user), muted: false, screen: false, cam: false, screenId: null, camId: null }); voiceRooms.set(c.id, room); voiceChan = c.id;
     socket.join("voice:" + c.id);
     socket.to("voice:" + c.id).emit("voicePeerJoined", { channelId: c.id, socketId: socket.id, user: pub(user) });
     broadcastRoster(c);
@@ -990,16 +998,25 @@ io.on("connection", (socket) => {
     const c = q.channel.get(voiceChan); if (c) broadcastRoster(c);
   }));
   // Partage d'écran : le serveur ne fait que signaler qui partage (la vidéo passe de navigateur à navigateur), 2 partages simultanés au maximum
-  socket.on("voiceScreen", guard(({ on }, ack) => {
+  socket.on("voiceScreen", guard(({ on, streamId }, ack) => {
     const room = voiceChan && voiceRooms.get(voiceChan), p = room && room.get(socket.id);
     if (!p) return ack({ error: "Rejoignez d'abord le salon vocal." });
     on = !!on;
     if (on && !p.screen && [...room.values()].filter((x) => x.screen).length >= MAX_SCREENS) return ack({ error: "Déjà " + MAX_SCREENS + " partages d'écran en cours dans ce salon." });
-    p.screen = on;
-    socket.to("voice:" + voiceChan).emit("voicePeerState", { socketId: socket.id, screen: on });
-    const c = q.channel.get(voiceChan); if (c) broadcastRoster(c);
+    p.screen = on; p.screenId = on ? String(streamId || "").slice(0, 80) : null; announceVideo(p);
     ack({ ok: true });
   }));
+  // Caméra : même principe que le partage d'écran (l'image passe de navigateur à navigateur)
+  socket.on("voiceCam", guard(({ on, streamId }, ack) => {
+    const room = voiceChan && voiceRooms.get(voiceChan), p = room && room.get(socket.id);
+    if (!p) return ack({ error: "Rejoignez d'abord le salon vocal." });
+    p.cam = !!on; p.camId = p.cam ? String(streamId || "").slice(0, 80) : null; announceVideo(p);
+    ack({ ok: true });
+  }));
+  function announceVideo(p) {
+    socket.to("voice:" + voiceChan).emit("voicePeerState", { socketId: socket.id, screen: p.screen, cam: p.cam, screenId: p.screenId, camId: p.camId });
+    const c = q.channel.get(voiceChan); if (c) broadcastRoster(c);
+  }
   socket.on("voiceLeave", guard(() => leaveVoice()));
 
   socket.on("disconnect", () => {
