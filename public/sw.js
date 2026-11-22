@@ -1,7 +1,7 @@
 // Service worker de Cordial : appli disponible hors ligne (coquille) et notifications push.
 // Les API, les fichiers, le temps réel et l'administration ne sont jamais mis en cache.
-const CACHE = "cordial-shell-v7";
-const SHELL = ["/", "/app", "/app.css", "/app.js", "/theme.css", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
+const CACHE = "cordial-shell-v9";
+const SHELL = ["/", "/app", "/app.css", "/app.js", "/theme.css", "/icons.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

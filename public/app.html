@@ -46,30 +46,30 @@
     <div class="vpanel" id="vpanel" hidden>
       <div class="vinfo"><span class="vdot"></span><div><div class="vstate" id="vState">Vocal connecté</div><div class="vname" id="vName"></div></div></div>
       <div class="vbtns">
-        <button class="icn" id="vShare" title="Partager l'écran" aria-label="Partager l'écran" hidden>🖥</button>
-        <button class="icn" id="vMute" title="Couper le micro" aria-label="Couper le micro">🎙</button>
-        <button class="icn danger" id="vLeave" title="Quitter le vocal" aria-label="Quitter le vocal">📞</button>
+        <button class="icn" id="vShare" title="Partager l'écran" aria-label="Partager l'écran" hidden><i data-ic="screen-share"></i></button>
+        <button class="icn" id="vMute" title="Couper le micro" aria-label="Couper le micro"><i data-ic="mic"></i></button>
+        <button class="icn danger" id="vLeave" title="Quitter le vocal" aria-label="Quitter le vocal"><i data-ic="phone-off"></i></button>
       </div>
     </div>
     <div class="me">
       <div class="av" id="meAv"></div>
       <div class="who"><div class="nm" id="meName"></div><div class="st" id="meSt"></div></div>
       <div class="grow">
-        <a class="icn" id="bAdmin" href="/admin" title="Administration" aria-label="Administration" hidden>🛡</a>
-        <button class="icn" id="bBell" title="Notifications" aria-label="Activer les notifications">🔕</button>
+        <a class="icn" id="bAdmin" href="/admin" title="Administration" aria-label="Administration" hidden><i data-ic="shield"></i></a>
+        <button class="icn" id="bBell" title="Notifications" aria-label="Activer les notifications"><i data-ic="bell-off"></i></button>
         <button class="icn" id="bSt" title="Changer le statut" aria-label="Changer le statut">●</button>
-        <button class="icn" id="bOut" title="Se déconnecter" aria-label="Se déconnecter">⏻</button>
+        <button class="icn" id="bOut" title="Se déconnecter" aria-label="Se déconnecter"><i data-ic="power"></i></button>
       </div>
     </div>
   </aside>
 
   <main class="main">
     <header class="top">
-      <button class="tbtn" id="bNav" aria-label="Ouvrir les salons">☰</button>
+      <button class="tbtn" id="bNav" aria-label="Ouvrir les salons"><i data-ic="menu"></i></button>
       <span class="t" id="tName"></span><span class="d" id="tTopic"></span><span class="sp"></span>
-      <button class="tbtn show" id="bSearch" title="Rechercher" aria-label="Rechercher dans ce salon">🔍</button>
-      <button class="tbtn show" id="bPins" title="Messages épinglés" aria-label="Messages épinglés">📌</button>
-      <button class="tbtn" id="bMem" aria-label="Afficher les membres">👥</button>
+      <button class="tbtn show" id="bSearch" title="Rechercher" aria-label="Rechercher dans ce salon"><i data-ic="search"></i></button>
+      <button class="tbtn show" id="bPins" title="Messages épinglés" aria-label="Messages épinglés"><i data-ic="pin"></i></button>
+      <button class="tbtn" id="bMem" aria-label="Afficher les membres"><i data-ic="users"></i></button>
     </header>
     <div class="banner" id="banner" hidden>Connexion perdue, reconnexion…</div>
     <div class="announce" id="announce" role="status" title="Cliquer pour masquer" hidden></div>
@@ -87,10 +87,10 @@
       <div class="strip" id="replyBar" hidden><span id="replyText"></span><button class="mini" id="replyCancel" aria-label="Annuler la réponse">✕</button></div>
       <div class="strip" id="fileBar" hidden><span id="fileName"></span><span class="prog" id="fileProg"></span><button class="mini" id="fileCancel" aria-label="Retirer le fichier">✕</button></div>
       <form class="box" id="form" autocomplete="off">
-        <button type="button" id="bAttach" title="Joindre un fichier" aria-label="Joindre un fichier">📎</button>
+        <button type="button" id="bAttach" title="Joindre un fichier" aria-label="Joindre un fichier"><i data-ic="paperclip"></i></button>
         <input type="file" id="fileInput" hidden accept=".png,.jpg,.jpeg,.gif,.webp,.mp3,.ogg,.wav,.mp4,.webm,.pdf,.zip,.txt">
         <input id="inp" type="text" maxlength="2000" aria-label="Message" autocomplete="off">
-        <button type="button" id="bEmo" aria-label="Emojis">😀</button>
+        <button type="button" id="bEmo" aria-label="Emojis"><i data-ic="smile"></i></button>
         <button type="submit" class="go" aria-label="Envoyer">➤</button>
       </form>
     </div>
@@ -104,6 +104,7 @@
 <div id="audioBox" hidden></div>
 
 <script src="/socket.io/socket.io.js"></script>
+<script src="/icons.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

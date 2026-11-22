@@ -220,7 +220,7 @@
   function renderRail() {
     const r = $("rail"); r.innerHTML = "";
     const n = S.dms.reduce((a, d) => a + (S.unread[d.id] || 0), 0);
-    const home = el("button", "srv home" + (S.view === "dm" ? " on" : ""), "💬"); home.title = "Messages privés"; home.setAttribute("aria-label", "Messages privés");
+    const home = icText(el("button", "srv home" + (S.view === "dm" ? " on" : "")), "message"); home.title = "Messages privés"; home.setAttribute("aria-label", "Messages privés");
     if (n) home.appendChild(el("span", "dot", String(n)));
     home.onclick = () => go("dm", null, dmOf(S.cid) ? S.cid : S.dms[0] ? S.dms[0].id : null);
     r.appendChild(home); r.appendChild(el("div", "sep"));
@@ -251,20 +251,20 @@
     const s = server(); if (!s) { $("sName").textContent = ""; return; }
     $("sName").textContent = s.name; $("bInvite").hidden = false; $("bRoles").hidden = !canIn(PERM.ROLES);
     const canManage = canIn(PERM.CHANNELS);
-    if (canManage) { const a = el("button", "addch", "＋ Créer un salon"); a.onclick = channelCreateModal; box.appendChild(a); }
+    if (canManage) { const a = icText(el("button", "addch"), "plus", "Créer un salon"); a.onclick = channelCreateModal; box.appendChild(a); }
     const cats = []; s.channels.forEach((c) => { if (cats.indexOf(c.category) < 0) cats.push(c.category); });
     cats.forEach((cat) => {
       box.appendChild(el("div", "cat", cat));
       s.channels.filter((c) => c.category === cat).forEach((c) => {
         const row = el("div", "chrow"), voice = c.kind === "voice", u = S.unread[c.id] || 0;
         const b = el("button", "ch" + (!voice && c.id === S.cid ? " on" : "") + (u ? " unread" : ""));
-        b.appendChild(el("span", "hash", voice ? "🔊" : "#")); b.appendChild(el("span", "", c.name));
+        { const h = el("span", "hash"); if (voice) h.innerHTML = ic("volume", 18); else h.textContent = "#"; b.appendChild(h); } b.appendChild(el("span", "", c.name));
         if (u && c.id !== S.cid) b.appendChild(el("span", "badge", String(u)));
         else if (c.readonly) b.appendChild(el("span", "lock", "🔒"));
         else if (c.slowmode) { const sl = el("span", "lock", "🐢"); sl.title = "Mode lent"; b.appendChild(sl); }
         b.onclick = () => (voice ? joinVoice(c) : go("server", s.id, c.id));
         row.appendChild(b);
-        if (canManage) { const g = el("button", "gear", "⚙"); g.title = "Réglages du salon"; g.setAttribute("aria-label", "Réglages du salon " + c.name); g.onclick = () => channelSettingsModal(c); row.appendChild(g); }
+        if (canManage) { const g = icText(el("button", "gear"), "sliders"); g.title = "Réglages du salon"; g.setAttribute("aria-label", "Réglages du salon " + c.name); g.onclick = () => channelSettingsModal(c); row.appendChild(g); }
         box.appendChild(row);
         if (voice && c.voice && c.voice.length) {
           const vu = el("div", "vusers");
@@ -329,7 +329,7 @@
     if (f.mime.startsWith("image/")) { const a = el("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; const i = el("img"); i.src = url; i.alt = f.name; i.loading = "lazy"; a.appendChild(i); w.appendChild(a); }
     else if (f.mime.startsWith("audio/")) { const a = el("audio"); a.controls = true; a.preload = "none"; a.src = url; w.appendChild(a); }
     else if (f.mime.startsWith("video/")) { const v = el("video"); v.controls = true; v.preload = "metadata"; v.src = url; w.appendChild(v); }
-    else { const a = el("a", "chip"); a.href = url + "?dl=1"; a.setAttribute("download", f.name); a.appendChild(el("span", "", "📎 " + f.name)); a.appendChild(el("small", "", fmtSize(f.size))); w.appendChild(a); }
+    else { const a = el("a", "chip"); a.href = url + "?dl=1"; a.setAttribute("download", f.name); { const sp = el("span"); icText(sp, "paperclip", f.name); a.appendChild(sp); } a.appendChild(el("small", "", fmtSize(f.size))); w.appendChild(a); }
     return w;
   }
   function msgNode(m, prev, compact) {
@@ -346,7 +346,7 @@
     if (first) {
       const hd = el("div", "hd"), u = el("span", "u", m.user.name); u.style.color = m.user.roleColor || color(m.user); u.onclick = (e) => userMenu(e, m.user); hd.appendChild(u);
       const tg = tagFor(m.user.role); if (tg) hd.appendChild(tg);
-      hd.appendChild(el("span", "ts", fmt(m.ts))); if (m.pinned) { const p = el("span", "pin", "📌"); p.title = "Message épinglé"; hd.appendChild(p); }
+      hd.appendChild(el("span", "ts", fmt(m.ts))); if (m.pinned) { const p = el("span", "pin"); p.innerHTML = ic("pin", 13); p.title = "Message épinglé"; hd.appendChild(p); }
       body.appendChild(hd);
     }
     if (S.editing === m.id && !compact) {
@@ -386,13 +386,13 @@
   }
   function toolbar(m, mine) {
     const t = el("div", "tools"), c = channel();
-    function add(icon, title, fn) { const b = el("button", "", icon); b.title = title; b.setAttribute("aria-label", title); b.type = "button"; b.onclick = fn; t.appendChild(b); }
+    function add(icon, title, fn) { const b = el("button", ""); if (IC[icon]) b.innerHTML = ic(icon); else b.textContent = icon; b.title = title; b.setAttribute("aria-label", title); b.type = "button"; b.onclick = fn; t.appendChild(b); }
     QUICK.forEach((e) => add(e, "Réagir " + e, () => react(m.id, e)));
-    add("↩", "Répondre", () => { S.reply = m; renderReply(); $("inp").focus(); });
-    if (mine && !m.poll && m.user.role !== "bot") add("✏", "Modifier", () => { S.editing = m.id; renderMsgs(); });
-    if (c && (c.kind === "dm" || privileged())) add("📌", m.pinned ? "Désépingler" : "Épingler", () => S.sock.emit("pin", { id: m.id, pinned: !m.pinned }, (r) => { if (r && r.error) toast(r.error); }));
-    if (!mine && m.user.role !== "bot") add("🚩", "Signaler", () => reportModal(m));
-    if (mine || privileged()) add("🗑", "Supprimer", () => S.sock.emit("delete", { id: m.id }, (r) => { if (r && r.error) toast(r.error); }));
+    add("reply", "Répondre", () => { S.reply = m; renderReply(); $("inp").focus(); });
+    if (mine && !m.poll && m.user.role !== "bot") add("edit", "Modifier", () => { S.editing = m.id; renderMsgs(); });
+    if (c && (c.kind === "dm" || privileged())) add("pin", m.pinned ? "Désépingler" : "Épingler", () => S.sock.emit("pin", { id: m.id, pinned: !m.pinned }, (r) => { if (r && r.error) toast(r.error); }));
+    if (!mine && m.user.role !== "bot") add("flag", "Signaler", () => reportModal(m));
+    if (mine || privileged()) add("trash", "Supprimer", () => S.sock.emit("delete", { id: m.id }, (r) => { if (r && r.error) toast(r.error); }));
     return t;
   }
   function renderMsgs(toBottom, soft) {
@@ -578,7 +578,7 @@
     ev.stopPropagation(); closeMenu();
     const m = el("div", "menu"); m.id = "ctxmenu"; m.appendChild(el("div", "hd", u.name));
     { const b = el("button", "", "👤 Voir le profil"); b.onclick = () => { closeMenu(); profileCard(u.id); }; m.appendChild(b); }
-    if (u.id !== S.me.id && u.role !== "bot") { const b = el("button", "", "💬 Écrire à " + u.name); b.onclick = () => { closeMenu(); openDm(u.id); }; m.appendChild(b); }
+    if (u.id !== S.me.id && u.role !== "bot") { const b = icText(el("button", ""), "message", "Écrire à " + u.name); b.onclick = () => { closeMenu(); openDm(u.id); }; m.appendChild(b); }
     else m.appendChild(el("div", "hd", u.id === S.me.id ? "C'est vous" : "Robot du serveur"));
     roleItems(m, u);
     document.body.appendChild(m);
@@ -609,9 +609,9 @@
       }
     }
     if (canIn(PERM.KICK) && u.id !== S.me.id && !higher) {
-      const b = el("button", "danger", "🚪 Expulser du serveur");
+      const b = icText(el("button", "danger"), "log-out", "Expulser du serveur");
       b.onclick = (e) => {
-        e.stopPropagation(); if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = "Cliquez encore pour confirmer"; return; }
+        e.stopPropagation(); if (!b.dataset.sure) { b.dataset.sure = 1; icText(b, "log-out", "Cliquez encore pour confirmer"); return; }
         S.sock.emit("kick", { serverId: S.sid, userId: u.id }, (x) => { if (x && x.error) toast(x.error); else toast(u.name + " a été expulsé."); }); closeMenu();
       };
       m.appendChild(b);
@@ -653,7 +653,7 @@
       });
       if (!info.roles.length) list.appendChild(el("p", "rhint", "Aucun rôle pour l'instant."));
       body.appendChild(list);
-      const add = el("button", "pbtn", "＋ Nouveau rôle"); add.type = "button";
+      const add = icText(el("button", "pbtn"), "plus", "Nouveau rôle"); add.type = "button";
       add.onclick = () => S.sock.emit("createRole", { serverId: sid, name: "Nouveau rôle", color: SWATCH[1 + Math.floor(Math.random() * 8)], perms: 0 }, (x) => { if (x && x.error) toast(x.error); else { sel = x.id; } });
       body.appendChild(add);
       const r = info.roles.find((x) => x.id === sel);
@@ -717,7 +717,7 @@
       body.appendChild(el("h3", "", "Membre depuis")); body.appendChild(el("p", "", DATE(p.created)));
       const close = overlay(card);
       if (p.id === S.me.id) { const b = el("button", "btn", "Modifier mon profil"); b.type = "button"; b.onclick = () => { close(); editProfile(); }; body.appendChild(b); }
-      else if (p.role !== "bot") { const b = el("button", "btn", "💬 Envoyer un message"); b.type = "button"; b.onclick = () => { close(); openDm(p.id); }; body.appendChild(b); }
+      else if (p.role !== "bot") { const b = icText(el("button", "btn"), "message", "Envoyer un message"); b.type = "button"; b.onclick = () => { close(); openDm(p.id); }; body.appendChild(b); }
       card.appendChild(body);
     });
   }
@@ -753,9 +753,9 @@
       };
       const pick = (k) => { kind = k; file.click(); };
       const remove = async (k) => { await fetch("/api/profile/image?kind=" + k, { method: "DELETE", headers: { Authorization: "Bearer " + S.token } }); p = { ...p, [k]: null }; paint(); };
-      const row = el("div", "prow"), mk = (t, fn, ghost) => { const b = el("button", "pbtn" + (ghost ? " ghost" : ""), t); b.type = "button"; b.onclick = fn; row.appendChild(b); return b; };
-      mk("📷 Changer la photo", () => pick("avatar")); const rm1 = mk("Retirer la photo", () => remove("avatar"), true);
-      mk("🖼 Changer la bannière", () => pick("banner")); const rm2 = mk("Retirer la bannière", () => remove("banner"), true);
+      const row = el("div", "prow"), mk = (t, fn, ghost, icn) => { const b = el("button", "pbtn" + (ghost ? " ghost" : "")); if (icn) icText(b, icn, t); else b.textContent = t; b.type = "button"; b.onclick = fn; row.appendChild(b); return b; };
+      mk("Changer la photo", () => pick("avatar"), false, "camera"); const rm1 = mk("Retirer la photo", () => remove("avatar"), true);
+      mk("Changer la bannière", () => pick("banner"), false, "image"); const rm2 = mk("Retirer la bannière", () => remove("banner"), true);
       const l1 = el("label", "", "Statut personnalisé"), i1 = el("input", "field"); i1.maxLength = 60; i1.value = p.custom; i1.placeholder = "Ex. En train de coder 💻"; l1.htmlFor = i1.id = "pf-custom";
       const l2 = el("label", "", "À propos de moi"), i2 = el("textarea", "field"); i2.maxLength = 190; i2.rows = 4; i2.value = p.bio; i2.placeholder = "Parlez de vous en quelques mots"; l2.htmlFor = i2.id = "pf-bio";
       body.append(row, file, l1, i1, l2, i2, err);
@@ -776,7 +776,7 @@
   /* ---------- Notifications push ---------- */
   const b64 = (s) => { const p = "=".repeat((4 - (s.length % 4)) % 4), r = atob((s + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...r].map((c) => c.charCodeAt(0))); };
   const auth = () => ({ "Content-Type": "application/json", Authorization: "Bearer " + S.token });
-  function renderBell() { const b = $("bBell"); const on = S.push || S.local; b.textContent = on ? "🔔" : "🔕"; b.title = on ? "Notifications activées (cliquer pour désactiver)" : "Activer les notifications"; b.setAttribute("aria-label", b.title); }
+  function renderBell() { const b = $("bBell"); const on = S.push || S.local; b.innerHTML = ic(on ? "bell" : "bell-off"); b.title = on ? "Notifications activées (cliquer pour désactiver)" : "Activer les notifications"; b.setAttribute("aria-label", b.title); }
   async function initPush() {
     try {
       if (!("serviceWorker" in navigator) || !("PushManager" in window)) return renderBell();
@@ -838,12 +838,12 @@
   function renderVoicePanel() {
     const p = $("vpanel"); p.hidden = !V.cid; if (!V.cid) return;
     const s = S.servers.find((x) => x.id === V.sid), c = s && s.channels.find((x) => x.id === V.cid);
-    $("vName").textContent = c ? "🔊 " + c.name + " · " + s.name : "";
+    $("vName").textContent = c ? c.name + " · " + s.name : "";
     const peers = [...V.peers.values()], st = peers.some((x) => x.state === "failed") ? "failed" : !peers.length || peers.every((x) => x.state === "connected") ? "connected" : "connecting";
     p.dataset.state = st; $("vState").textContent = st === "failed" ? "Connexion impossible" : st === "connecting" ? "Connexion…" : "Vocal connecté";
     const sh = $("vShare"); sh.hidden = !(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && !(window.cordialDesktop && window.cordialDesktop.screenSources);
-    sh.classList.toggle("on", !!V.screen); sh.title = sh.ariaLabel = V.screen ? "Arrêter le partage d'écran" : "Partager l'écran";
-    const mb = $("vMute"); mb.textContent = V.muted ? "🔇" : "🎙"; mb.classList.toggle("off", V.muted); mb.title = mb.ariaLabel = V.muted ? "Réactiver le micro" : "Couper le micro";
+    sh.innerHTML = ic(V.screen ? "screen-off" : "screen-share"); sh.classList.toggle("on", !!V.screen); sh.title = sh.ariaLabel = V.screen ? "Arrêter le partage d'écran" : "Partager l'écran";
+    const mb = $("vMute"); mb.innerHTML = ic(V.muted ? "mic-off" : "mic"); mb.classList.toggle("off", V.muted); mb.title = mb.ariaLabel = V.muted ? "Réactiver le micro" : "Couper le micro";
   }
   async function joinVoice(c) {
     if (V.cid === c.id) return;
@@ -914,7 +914,7 @@
     let t = V.tiles.get(key);
     if (!t) {
       const box = el("div", "tile"), v = el("video"); v.autoplay = true; v.playsInline = true; v.setAttribute("playsinline", ""); if (key === "me") v.muted = true;
-      const cap = el("span", "cap", key === "me" ? "Votre écran" : "Écran de " + user.name), fs = el("button", "full", "⛶"); fs.type = "button"; fs.title = "Plein écran"; fs.setAttribute("aria-label", "Plein écran");
+      const cap = el("span", "cap", key === "me" ? "Votre écran" : "Écran de " + user.name), fs = icText(el("button", "full"), "maximize"); fs.type = "button"; fs.title = "Plein écran"; fs.setAttribute("aria-label", "Plein écran");
       fs.onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else (box.requestFullscreen || v.requestFullscreen).call(box).catch(() => {}); };
       box.append(v, cap, fs); $("stage").appendChild(box); t = { box, v }; V.tiles.set(key, t);
     }
