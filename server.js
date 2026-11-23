@@ -58,6 +58,24 @@ db.exec(`
     role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
     PRIMARY KEY (user_id, role_id)
   );
+  CREATE TABLE IF NOT EXISTS channel_roles (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (channel_id, role_id)
+  );
+  CREATE TABLE IF NOT EXISTS bans (
+    server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    until INTEGER, reason TEXT NOT NULL DEFAULT '', by_id INTEGER, ts INTEGER NOT NULL, PRIMARY KEY (server_id, user_id)
+  );
+  CREATE TABLE IF NOT EXISTS mutes (
+    server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    until INTEGER NOT NULL, reason TEXT NOT NULL DEFAULT '', by_id INTEGER, ts INTEGER NOT NULL, PRIMARY KEY (server_id, user_id)
+  );
+  CREATE TABLE IF NOT EXISTS sanctions (
+    id INTEGER PRIMARY KEY, server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', until INTEGER, by_id INTEGER, ts INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS sanctions_srv ON sanctions (server_id, id);
   CREATE TABLE IF NOT EXISTS channels (
     id INTEGER PRIMARY KEY, server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
     name TEXT NOT NULL, topic TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT 'Salons',
@@ -109,6 +127,7 @@ for (const sql of [
   "ALTER TABLE users ADD COLUMN avatar TEXT", "ALTER TABLE users ADD COLUMN banner TEXT",
   "ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT ''", "ALTER TABLE users ADD COLUMN custom TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE files ADD COLUMN purpose TEXT",
+  "ALTER TABLE channels ADD COLUMN private INTEGER NOT NULL DEFAULT 0",
 ]) { try { db.exec(sql); } catch (e) { /* colonne déjà présente */ } }
 db.prepare("UPDATE users SET role = 'admin' WHERE lower(name) IN (" + ADMIN_NAMES.map(() => "?").join(",") + ")").run(...ADMIN_NAMES);
 
@@ -135,6 +154,13 @@ const q = {
   insServer: db.prepare("INSERT INTO servers (name, abbr, code, owner_id) VALUES (?, ?, ?, ?)"),
   join: db.prepare("INSERT OR IGNORE INTO members (server_id, user_id) VALUES (?, ?)"),
   isMember: db.prepare("SELECT 1 AS ok FROM members WHERE server_id = ? AND user_id = ?"),
+  chRoles: db.prepare("SELECT role_id FROM channel_roles WHERE channel_id = ?"),
+  canSeeByRole: db.prepare("SELECT 1 FROM channel_roles cr JOIN member_roles mr ON mr.role_id = cr.role_id WHERE cr.channel_id = ? AND mr.user_id = ? LIMIT 1"),
+  getBan: db.prepare("SELECT * FROM bans WHERE server_id = ? AND user_id = ?"),
+  getMute: db.prepare("SELECT * FROM mutes WHERE server_id = ? AND user_id = ?"),
+  setBan: db.prepare("INSERT OR REPLACE INTO bans (server_id, user_id, until, reason, by_id, ts) VALUES (?, ?, ?, ?, ?, ?)"),
+  setMute: db.prepare("INSERT OR REPLACE INTO mutes (server_id, user_id, until, reason, by_id, ts) VALUES (?, ?, ?, ?, ?, ?)"),
+  insSanction: db.prepare("INSERT INTO sanctions (server_id, user_id, type, reason, until, by_id, ts) VALUES (?, ?, ?, ?, ?, ?, ?)"),
   rolesOf: db.prepare("SELECT r.*, (SELECT COUNT(*) FROM member_roles mr WHERE mr.role_id = r.id) AS count FROM roles r WHERE r.server_id = ? ORDER BY r.position DESC, r.id"),
   roleById: db.prepare("SELECT * FROM roles WHERE id = ?"),
   userRoles: db.prepare("SELECT r.* FROM member_roles mr JOIN roles r ON r.id = mr.role_id WHERE mr.server_id = ? AND mr.user_id = ? ORDER BY r.position DESC, r.id"),
@@ -470,20 +496,27 @@ function shownStatus(u) {
   return u.status;
 }
 function pub(u) { return { id: u.id, name: u.name, color: u.color, role: u.role, avatar: u.avatar || null, custom: u.custom || "" }; }
-function chView(c) {
-  const v = { id: c.id, name: c.name, topic: c.topic, category: c.category, kind: c.kind, slowmode: c.slowmode, readonly: !!c.readonly };
+// Un salon privé n'est visible que par les rôles choisis, et par ceux qui gèrent les salons (propriétaire, équipe du site, droit « Gérer les salons »)
+function canSee(user, c) {
+  if (!c.private) return true;
+  return can(user, c.server_id, P.CHANNELS) || !!q.canSeeByRole.get(c.id, user.id);
+}
+function chView(c, viewer) {
+  const v = { id: c.id, name: c.name, topic: c.topic, category: c.category, kind: c.kind, slowmode: c.slowmode, readonly: !!c.readonly, private: !!c.private };
+  if (c.private && viewer && can(viewer, c.server_id, P.CHANNELS)) v.roleIds = q.chRoles.all(c.id).map((r) => r.role_id);
   if (c.kind === "voice") v.voice = rosterOf(c.id);
   return v;
 }
-function serverView(s) {
-  return { id: s.id, name: s.name, abbr: s.abbr, code: s.code, owner: s.owner_id, channels: q.channelsOf.all(s.id).map(chView) };
+const visibleChannels = (sid, user) => q.channelsOf.all(sid).filter((c) => canSee(user, c)).map((c) => chView(c, user));
+function serverView(s, user) {
+  return { id: s.id, name: s.name, abbr: s.abbr, code: s.code, owner: s.owner_id, channels: visibleChannels(s.id, user) };
 }
 function rosterOf(channelId) {
   const room = voiceRooms.get(channelId);
   return room ? [...room.values()].map((p) => ({ ...p.user, muted: p.muted, screen: !!p.screen, cam: !!p.cam })) : [];
 }
 function broadcastRoster(c) {
-  io.to("srv:" + c.server_id).emit("voiceRoster", { serverId: c.server_id, channelId: c.id, users: rosterOf(c.id) });
+  io.to(roomsOf(c)).emit("voiceRoster", { serverId: c.server_id, channelId: c.id, users: rosterOf(c.id) });
 }
 const MAX_SCREENS = 2;
 const NUM = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"];
@@ -509,14 +542,19 @@ function canAccess(userId, channelId) {
   const c = q.channel.get(channelId);
   if (!c) return null;
   if (c.kind === "dm") return q.isDmMember.get(c.id, userId) ? c : null;
-  return q.isMember.get(c.server_id, userId) ? c : null;
+  if (!q.isMember.get(c.server_id, userId)) return null;
+  if (c.private) { const u = q.userById.get(userId); if (!u || !canSee(u, c)) return null; }
+  return c;
 }
 // Salles Socket.IO qui reçoivent les évènements d'un salon
 function roomsOf(c) {
-  return c.kind === "dm" ? q.dmUsers.all(c.id).map((r) => "user:" + r.user_id) : ["srv:" + c.server_id];
+  if (c.kind === "dm") return q.dmUsers.all(c.id).map((r) => "user:" + r.user_id);
+  // Salon privé : seulement les salles des personnes autorisées (rien ne passe par la salle du serveur)
+  if (c.private) return q.membersOf.all(c.server_id).filter((m) => canSee(m, c)).map((m) => "user:" + m.id);
+  return ["srv:" + c.server_id];
 }
 /* ---------- Rôles et permissions par serveur ---------- */
-const P = { MESSAGES: 1, CHANNELS: 2, ROLES: 4, KICK: 8, VIP: 16 }, P_ALL = 31, TOP_RANK = 1e9;
+const P = { MESSAGES: 1, CHANNELS: 2, ROLES: 4, KICK: 8, VIP: 16, BAN: 32, MUTE: 64 }, P_ALL = 127, TOP_RANK = 1e9, MOD = P.KICK | P.BAN | P.MUTE;
 const isOwnerOf = (user, sid) => { const sv = q.serverById.get(sid); return !!sv && sv.owner_id === user.id; };
 // Propriétaire, modérateur du site ou administrateur : tous les droits. Sinon, cumul des droits des rôles reçus.
 function permsOf(user, sid) {
@@ -535,6 +573,13 @@ function privileged(user, c, flag = P.MESSAGES) {
   if (c.kind === "dm") return false;
   return can(user, c.server_id, flag);
 }
+/* ---------- Sanctions ---------- */
+const fmtDate = (t) => new Date(t).toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+function activeBan(sid, uid) { const b = q.getBan.get(sid, uid); return b && (b.until === null || b.until > Date.now()) ? b : null; }
+function activeMute(sid, uid) { const m = q.getMute.get(sid, uid); return m && m.until > Date.now() ? m : null; }
+const canMod = (user, sid) => (permsOf(user, sid) & MOD) !== 0;
+function logSanction(sid, uid, type, reason, until, byId) { q.insSanction.run(sid, uid, type, reason, until || null, byId, Date.now()); }
+
 function fullProfile(u) {
   return { id: u.id, name: u.name, color: u.color, role: u.role, avatar: u.avatar || null, banner: u.banner || null, bio: u.bio || "", custom: u.custom || "", created: u.created, status: shownStatus(u) };
 }
@@ -591,7 +636,7 @@ function pushForMessage(c, user, m, text) {
   const body = (text || (m.f_id ? "📎 " + m.f_name : "")).slice(0, 120);
   who.forEach((id) => {
     const target = q.userById.get(id);
-    if (!target || target.banned || target.role === "bot") return;
+    if (!target || target.banned || target.role === "bot" || (c.private && !canSee(target, c))) return;
     // Pas de notification si la personne regarde déjà l'application
     if (isOnline(id) && [...online.get(id).values()].some((s) => s.visible)) return;
     sendPush(id, { title: c.kind === "dm" ? user.name : user.name + " · #" + c.name, body, tag: "ch" + c.id, url: "/app" });
@@ -609,7 +654,7 @@ io.on("connection", (socket) => {
   const servers = q.serversOf.all(uid);
   servers.forEach((s) => socket.join("srv:" + s.id));
   const dms = q.dmsOf.all(uid).map((d) => ({ id: d.id, other: { id: d.oid, name: d.name, color: d.color, role: d.role, avatar: d.avatar || null, custom: d.custom || "", status: shownStatus(d.oid ? { ...d, id: d.oid } : d) } }));
-  socket.emit("ready", { me: { ...pub(user), status: user.status }, servers: servers.map(serverView), dms, ice: ICE });
+  socket.emit("ready", { me: { ...pub(user), status: user.status }, servers: servers.map((s) => serverView(s, user)), dms, ice: ICE });
   broadcastPresence(user);
 
   let stamps = [], voiceChan = null;
@@ -652,6 +697,7 @@ io.on("connection", (socket) => {
     const c = canAccess(uid, channelId);
     if (!c) return ack({ error: "Accès refusé." });
     if (c.kind === "voice") return ack({ error: "Ce salon est un salon vocal." });
+    if (c.kind !== "dm") { const mu = activeMute(c.server_id, uid); if (mu) return ack({ error: "Vous êtes en sourdine jusqu'au " + fmtDate(mu.until) + (mu.reason ? " (" + mu.reason + ")" : "") + "." }); }
     const body = clean(text, MAX_MSG), power = privileged(user, c, P.VIP);
     if (c.readonly && !power) return ack({ error: "Ce salon est en lecture seule." });
     if (c.slowmode && !power) {
@@ -746,6 +792,7 @@ io.on("connection", (socket) => {
     const m = q.message.get(id); emoji = clean(emoji, 16);
     if (!m || !emoji) return ack({ error: "Introuvable." });
     const c = canAccess(uid, m.channel_id); if (!c) return ack({ error: "Accès refusé." });
+    if (c.kind !== "dm" && activeMute(c.server_id, uid)) return ack({ error: "Vous êtes en sourdine : vous ne pouvez pas réagir." });
     const had = q.hasReaction.get(id, uid, emoji);
     if (had) q.delReaction.run(id, uid, emoji);
     else {
@@ -825,20 +872,22 @@ io.on("connection", (socket) => {
       q.join.run(id, uid);
       return q.serverById.get(id);
     });
-    socket.join("srv:" + s.id); ack({ server: serverView(s) });
+    socket.join("srv:" + s.id); ack({ server: serverView(s, cur()) });
   }));
 
   socket.on("joinServer", guard(({ code }, ack) => {
     const s = q.serverByCode.get(clean(code, 12).toUpperCase());
     if (!s || s.id === DM_SERVER) return ack({ error: "Code d'invitation invalide." });
+    const ban = activeBan(s.id, uid);
+    if (ban) return ack({ error: "Vous êtes banni de ce serveur " + (ban.until ? "jusqu'au " + fmtDate(ban.until) : "définitivement") + (ban.reason ? " (" + ban.reason + ")" : "") + "." });
     q.join.run(s.id, uid); socket.join("srv:" + s.id);
     io.to("srv:" + s.id).emit("membersChanged", { serverId: s.id });
-    ack({ server: serverView(s) });
+    ack({ server: serverView(s, cur()) });
   }));
 
   /* --- Rôles --- */
   const roleView = (r) => ({ id: r.id, name: r.name, color: r.color, position: r.position, perms: r.perms, count: r.count || 0 });
-  const rolesChanged = (sid) => io.to("srv:" + sid).emit("rolesChanged", { serverId: sid });
+  const rolesChanged = (sid) => { io.to("srv:" + sid).emit("rolesChanged", { serverId: sid }); io.to("srv:" + sid).emit("channelsChanged", { serverId: sid }); }; // les clients rechargent aussi leurs salons : un rôle peut ouvrir ou fermer un salon privé
   const COLOR = /^#[0-9a-fA-F]{6}$/;
   // Contrôle commun : droit de gérer les rôles, et le rôle visé doit être plus bas que le sien
   function manageable(roleId, ack) {
@@ -851,7 +900,8 @@ io.on("connection", (socket) => {
   socket.on("roles", guard(({ serverId }, ack) => {
     if (!q.isMember.get(serverId, uid)) return ack({ error: "Accès refusé." });
     user = cur();
-    ack({ roles: q.rolesOf.all(serverId).map(roleView), perms: permsOf(user, serverId), rank: rankOf(user, serverId) });
+    const mu = activeMute(serverId, uid);
+    ack({ roles: q.rolesOf.all(serverId).map(roleView), perms: permsOf(user, serverId), rank: rankOf(user, serverId), mod: canMod(user, serverId), mutedUntil: mu ? mu.until : null });
   }));
   socket.on("createRole", guard(({ serverId, name, color, perms }, ack) => {
     user = cur();
@@ -909,20 +959,111 @@ io.on("connection", (socket) => {
     }));
     rolesChanged(serverId); ack({ ok: true });
   }));
-  socket.on("kick", guard(({ serverId, userId }, ack) => {
+  /* ---------- Sanctions : avertissement, sourdine, expulsion, bannissement ---------- */
+  // Cible valide : membre du serveur (ou banni, pour le débannissement), de rang strictement inférieur
+  function sanctionTarget(serverId, userId, flag, ack, { allowFormer = false } = {}) {
     user = cur();
     const s = q.serverById.get(serverId), t = q.userById.get(Number(userId));
-    if (!s || !t || s.id === DM_SERVER || !q.isMember.get(serverId, uid) || !q.isMember.get(serverId, t.id)) return ack({ error: "Membre introuvable." });
-    if (!can(user, serverId, P.KICK)) return ack({ error: "Vous n'avez pas la permission d'expulser." });
-    if (t.id === uid) return ack({ error: "Vous ne pouvez pas vous expulser vous-même." });
-    if (t.id === s.owner_id || rankOf(t, serverId) >= rankOf(user, serverId)) return ack({ error: "Ce membre est au même niveau que vous ou au-dessus." });
-    tx(() => { db.prepare("DELETE FROM member_roles WHERE server_id = ? AND user_id = ?").run(serverId, t.id); db.prepare("DELETE FROM members WHERE server_id = ? AND user_id = ?").run(serverId, t.id); });
-    io.to("user:" + t.id).emit("kicked", { serverId, name: s.name });
-    io.in("user:" + t.id).socketsLeave("srv:" + serverId);
-    io.to("srv:" + serverId).emit("membersChanged", { serverId }); ack({ ok: true });
+    if (!s || !t || s.id === DM_SERVER || !q.isMember.get(serverId, uid)) { ack({ error: "Membre introuvable." }); return null; }
+    if (!can(user, serverId, flag)) { ack({ error: "Vous n'avez pas la permission pour cette action." }); return null; }
+    if (!allowFormer && !q.isMember.get(serverId, t.id)) { ack({ error: "Membre introuvable." }); return null; }
+    if (t.id === uid) { ack({ error: "Vous ne pouvez pas vous sanctionner vous-même." }); return null; }
+    if (t.id === s.owner_id || t.role === "admin" || (q.isMember.get(serverId, t.id) && rankOf(t, serverId) >= rankOf(user, serverId))) { ack({ error: "Ce membre est au même niveau que vous ou au-dessus." }); return null; }
+    return { s, t };
+  }
+  const tell = (t, sid, payload) => io.to("user:" + t.id).emit("sanction", { serverId: sid, ...payload });
+  const removeMember = (sid, tid) => tx(() => { db.prepare("DELETE FROM member_roles WHERE server_id = ? AND user_id = ?").run(sid, tid); db.prepare("DELETE FROM members WHERE server_id = ? AND user_id = ?").run(sid, tid); });
+  function evict(s, t, extra = {}) {
+    removeMember(s.id, t.id);
+    io.to("user:" + t.id).emit("kicked", { serverId: s.id, name: s.name, ...extra });
+    io.in("user:" + t.id).socketsLeave("srv:" + s.id);
+    io.to("srv:" + s.id).emit("membersChanged", { serverId: s.id });
+  }
+  const reasonOf = (r) => clean(r, 200);
+
+  socket.on("kick", guard(({ serverId, userId, reason }, ack) => {
+    const r = sanctionTarget(serverId, userId, P.KICK, ack); if (!r) return;
+    logSanction(serverId, r.t.id, "kick", reasonOf(reason), null, uid);
+    evict(r.s, r.t, { reason: reasonOf(reason) }); ack({ ok: true });
   }));
 
-  socket.on("createChannel", guard(({ serverId, name, topic, kind }, ack) => {
+  socket.on("ban", guard(({ serverId, userId, hours, reason }, ack) => {
+    const r = sanctionTarget(serverId, userId, P.BAN, ack); if (!r) return;
+    const perm = hours === null || hours === undefined || hours === 0, h = perm ? null : Math.floor(Number(hours));
+    if (!perm && !(h >= 1 && h <= 24 * 365)) return ack({ error: "Durée invalide." });
+    const until = h ? Date.now() + h * 3600e3 : null, why = reasonOf(reason);
+    q.setBan.run(serverId, r.t.id, until, why, uid, Date.now());
+    db.prepare("DELETE FROM mutes WHERE server_id = ? AND user_id = ?").run(serverId, r.t.id);
+    logSanction(serverId, r.t.id, "ban", why, until, uid);
+    evict(r.s, r.t, { banned: true, until, reason: why }); ack({ ok: true });
+  }));
+
+  socket.on("unban", guard(({ serverId, userId }, ack) => {
+    const r = sanctionTarget(serverId, userId, P.BAN, ack, { allowFormer: true }); if (!r) return;
+    if (!db.prepare("DELETE FROM bans WHERE server_id = ? AND user_id = ?").run(serverId, r.t.id).changes) return ack({ error: "Cette personne n'est pas bannie." });
+    logSanction(serverId, r.t.id, "unban", "", null, uid); ack({ ok: true });
+  }));
+
+  socket.on("warn", guard(({ serverId, userId, reason }, ack) => {
+    const r = sanctionTarget(serverId, userId, P.MUTE, ack); if (!r) return;
+    const why = reasonOf(reason); if (!why) return ack({ error: "Indiquez le motif de l'avertissement." });
+    logSanction(serverId, r.t.id, "warn", why, null, uid);
+    tell(r.t, serverId, { type: "warn", reason: why, server: r.s.name });
+    ack({ ok: true });
+  }));
+
+  socket.on("mute", guard(({ serverId, userId, minutes, reason }, ack) => {
+    const r = sanctionTarget(serverId, userId, P.MUTE, ack); if (!r) return;
+    const m = Math.floor(Number(minutes) || 10);
+    if (m < 1 || m > 7 * 24 * 60) return ack({ error: "Durée invalide (1 minute à 7 jours)." });
+    const until = Date.now() + m * 60e3, why = reasonOf(reason);
+    q.setMute.run(serverId, r.t.id, until, why, uid, Date.now());
+    logSanction(serverId, r.t.id, "mute", why, until, uid);
+    tell(r.t, serverId, { type: "mute", until, reason: why, server: r.s.name });
+    io.to("user:" + r.t.id).emit("forceVoiceLeave", { serverId });
+    ack({ ok: true, until });
+  }));
+
+  socket.on("unmute", guard(({ serverId, userId }, ack) => {
+    const r = sanctionTarget(serverId, userId, P.MUTE, ack); if (!r) return;
+    if (!db.prepare("DELETE FROM mutes WHERE server_id = ? AND user_id = ?").run(serverId, r.t.id).changes) return ack({ error: "Cette personne n'est pas en sourdine." });
+    logSanction(serverId, r.t.id, "unmute", "", null, uid);
+    tell(r.t, serverId, { type: "unmute", server: r.s.name }); ack({ ok: true });
+  }));
+
+  // Historique et sanctions en cours : réservé à l'équipe de modération du serveur
+  socket.on("sanctions", guard(({ serverId, userId }, ack) => {
+    user = cur();
+    if (!q.isMember.get(serverId, uid) || !canMod(user, serverId)) return ack({ error: "Réservé aux modérateurs." });
+    const now = Date.now(), nameOf = (id) => { const u = id && q.userById.get(id); return u ? u.name : "—"; };
+    const view = (r) => ({ id: r.id, type: r.type, reason: r.reason, until: r.until, ts: r.ts, user: { id: r.user_id, name: nameOf(r.user_id) }, by: nameOf(r.by_id) });
+    if (userId) { // fiche d'un membre
+      const rows = db.prepare("SELECT * FROM sanctions WHERE server_id = ? AND user_id = ? ORDER BY id DESC LIMIT 100").all(serverId, Number(userId));
+      return ack({ history: rows.map(view), mute: activeMute(serverId, Number(userId)), ban: activeBan(serverId, Number(userId)) });
+    }
+    const bans = db.prepare("SELECT * FROM bans WHERE server_id = ? AND (until IS NULL OR until > ?) ORDER BY ts DESC").all(serverId, now);
+    const mutes = db.prepare("SELECT * FROM mutes WHERE server_id = ? AND until > ? ORDER BY until").all(serverId, now);
+    const rows = db.prepare("SELECT * FROM sanctions WHERE server_id = ? ORDER BY id DESC LIMIT 200").all(serverId);
+    ack({
+      bans: bans.map((b) => ({ user: { id: b.user_id, name: nameOf(b.user_id) }, until: b.until, reason: b.reason, ts: b.ts, by: nameOf(b.by_id) })),
+      mutes: mutes.map((m) => ({ user: { id: m.user_id, name: nameOf(m.user_id) }, until: m.until, reason: m.reason, ts: m.ts, by: nameOf(m.by_id) })),
+      history: rows.map(view),
+    });
+  }));
+
+  // Rôles autorisés d'un salon privé : uniquement des rôles de ce serveur
+  const setChannelRoles = (c, roleIds) => {
+    db.prepare("DELETE FROM channel_roles WHERE channel_id = ?").run(c.id);
+    if (!c.private) return;
+    const valid = new Set(q.rolesOf.all(c.server_id).map((r) => r.id));
+    [...new Set((Array.isArray(roleIds) ? roleIds : []).map(Number))].filter((id) => valid.has(id)).forEach((id) => db.prepare("INSERT INTO channel_roles (channel_id, role_id) VALUES (?, ?)").run(c.id, id));
+  };
+  const channelsChanged = (sid) => io.to("srv:" + sid).emit("channelsChanged", { serverId: sid });
+  socket.on("channels", guard(({ serverId }, ack) => {
+    if (!q.isMember.get(serverId, uid)) return ack({ error: "Accès refusé." });
+    ack({ channels: visibleChannels(serverId, cur()) });
+  }));
+  socket.on("createChannel", guard(({ serverId, name, topic, kind, private: priv, roleIds }, ack) => {
     user = cur();
     const s = q.serverById.get(serverId);
     if (!s || s.id === DM_SERVER || !can(user, s.id, P.CHANNELS)) return ack({ error: "Vous n'avez pas la permission de créer un salon." });
@@ -930,11 +1071,12 @@ io.on("connection", (socket) => {
     if (!/^[\p{L}\p{N}_-]{1,24}$/u.test(n)) return ack({ error: "Nom de salon invalide." });
     const k = kind === "voice" ? "voice" : "text";
     const id = Number(q.insChannel.run(serverId, n, clean(topic, 100), k === "voice" ? "Vocal" : "Salons", k).lastInsertRowid);
-    io.to("srv:" + serverId).emit("channelCreated", { serverId, channel: chView(q.channel.get(id)) });
+    if (priv) { db.prepare("UPDATE channels SET private = 1 WHERE id = ?").run(id); setChannelRoles(q.channel.get(id), roleIds); channelsChanged(serverId); }
+    else io.to("srv:" + serverId).emit("channelCreated", { serverId, channel: chView(q.channel.get(id)) });
     ack({ ok: true });
   }));
 
-  socket.on("setChannel", guard(({ channelId, slowmode, readonly, topic }, ack) => {
+  socket.on("setChannel", guard(({ channelId, slowmode, readonly, topic, private: priv, roleIds }, ack) => {
     user = cur();
     const c = q.channel.get(channelId);
     if (!c || c.kind === "dm") return ack({ error: "Salon introuvable." });
@@ -942,8 +1084,15 @@ io.on("connection", (socket) => {
     if (!can(user, s.id, P.CHANNELS)) return ack({ error: "Vous n'avez pas la permission de modifier ce salon." });
     const slow = slowmode === undefined ? c.slowmode : Math.max(0, Math.min(SLOW_MAX, Math.floor(Number(slowmode)) || 0));
     const ro = readonly === undefined ? c.readonly : readonly ? 1 : 0;
+    const wasPrivate = !!c.private, isPrivate = priv === undefined ? wasPrivate : !!priv;
     q.updChannel.run(topic === undefined ? c.topic : clean(topic, 100), c.kind === "voice" ? 0 : slow, c.kind === "voice" ? 0 : ro, c.id);
-    io.to("srv:" + c.server_id).emit("channelUpdated", { serverId: c.server_id, channel: chView(q.channel.get(c.id)) });
+    if (priv !== undefined || roleIds !== undefined) {
+      db.prepare("UPDATE channels SET private = ? WHERE id = ?").run(isPrivate ? 1 : 0, c.id);
+      setChannelRoles(q.channel.get(c.id), roleIds === undefined ? q.chRoles.all(c.id).map((r) => r.role_id) : roleIds);
+    }
+    // Tout changement de visibilité : chacun recharge sa propre liste de salons
+    if (wasPrivate || isPrivate) channelsChanged(c.server_id);
+    else io.to("srv:" + c.server_id).emit("channelUpdated", { serverId: c.server_id, channel: chView(q.channel.get(c.id)) });
     ack({ ok: true });
   }));
 
@@ -957,7 +1106,7 @@ io.on("connection", (socket) => {
     db.prepare("SELECT id FROM messages WHERE channel_id = ?").all(c.id).forEach((m) => removeFiles(m.id));
     voiceRooms.delete(c.id); io.in("voice:" + c.id).emit("voiceEnded", { channelId: c.id }); io.in("voice:" + c.id).socketsLeave("voice:" + c.id);
     q.delChannel.run(c.id);
-    io.to("srv:" + c.server_id).emit("channelDeleted", { serverId: c.server_id, channelId: c.id });
+    if (c.private) channelsChanged(c.server_id); else io.to("srv:" + c.server_id).emit("channelDeleted", { serverId: c.server_id, channelId: c.id });
     ack({ ok: true });
   }));
 
@@ -974,6 +1123,7 @@ io.on("connection", (socket) => {
     user = cur();
     const c = canAccess(uid, channelId);
     if (!c || c.kind !== "voice") return ack({ error: "Salon vocal introuvable." });
+    if (activeMute(c.server_id, uid)) return ack({ error: "Vous êtes en sourdine : le vocal est indisponible." });
     if (voiceChan === c.id) return ack({ error: "Vous êtes déjà dans ce salon." });
     leaveVoice();
     const room = voiceRooms.get(c.id) || new Map();

@@ -1,17 +1,28 @@
 {
-  "name": "cordial",
+  "name": "cordial-desktop",
   "version": "1.0.0",
-  "description": "Clone de Discord : chat temps réel avec comptes, serveurs et salons",
-  "main": "server.js",
+  "description": "Application de bureau Cordial",
+  "main": "main.js",
+  "author": "Cordial",
+  "license": "UNLICENSED",
+  "private": true,
   "scripts": {
-    "start": "node server.js"
+    "start": "electron .",
+    "dist": "electron-builder --publish never",
+    "dist:win": "electron-builder --win --publish never"
   },
-  "engines": {
-    "node": ">=22.13"
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^26.0.0"
   },
-  "dependencies": {
-    "express": "^4.21.2",
-    "socket.io": "^4.8.1",
-    "web-push": "^4.0.0"
+  "build": {
+    "appId": "fr.cordial.desktop",
+    "productName": "Cordial",
+    "directories": { "buildResources": "assets", "output": "dist" },
+    "files": ["main.js", "preload.js", "setup.html", "setup.js", "offline.html", "offline.js", "config.json", "assets/**"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "artifactName": "Cordial-Setup.${ext}" },
+    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true, "language": "1036", "shortcutName": "Cordial" },
+    "mac": { "target": ["dmg"], "category": "public.app-category.social-networking", "artifactName": "Cordial.${ext}", "extendInfo": { "NSMicrophoneUsageDescription": "Cordial utilise le micro pour les salons vocaux." } },
+    "linux": { "target": ["AppImage"], "category": "Network", "artifactName": "Cordial.${ext}" }
   }
 }
