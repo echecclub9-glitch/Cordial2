@@ -113,7 +113,19 @@
     sock.on("presence", onPresence); sock.on("profile", onProfile);
     sock.on("membersChanged", (d) => loadMembers(d.serverId));
     sock.on("rolesChanged", (d) => { loadRoles(d.serverId); loadMembers(d.serverId); });
-    sock.on("kicked", (d) => { onServerDeleted({ serverId: d.serverId }); toast("Vous avez été expulsé de « " + d.name + " »."); });
+    sock.on("kicked", (d) => {
+      onServerDeleted({ serverId: d.serverId });
+      if (d.banned) toast("Vous avez été banni de « " + d.name + " » " + (d.until ? "jusqu'au " + WHEN(d.until) : "définitivement") + (d.reason ? " — " + d.reason : "") + ".");
+      else toast("Vous avez été expulsé de « " + d.name + " »." + (d.reason ? " Motif : " + d.reason : ""));
+    });
+    sock.on("channelsChanged", (d) => refreshChannels(d.serverId));
+    sock.on("forceVoiceLeave", (d) => { if (V.sid === d.serverId) leaveVoice(); });
+    sock.on("sanction", (d) => {
+      loadRoles(d.serverId);
+      if (d.type === "warn") { const m = modal({ title: "Avertissement", sub: "Un modérateur de « " + d.server + " » vous adresse un avertissement.", buttons: [{ label: "J'ai compris", run: (mm) => mm.close() }] }); m.card.insertBefore(el("div", "warnbox", d.reason), m.err); }
+      else if (d.type === "mute") toast("Vous êtes en sourdine sur « " + d.server + " » jusqu'à " + WHEN(d.until) + (d.reason ? " — " + d.reason : "") + ".");
+      else if (d.type === "unmute") toast("Votre sourdine sur « " + d.server + " » a été levée.");
+    });
     sock.on("channelCreated", (d) => { const s = S.servers.find((x) => x.id === d.serverId); if (s && !s.channels.some((c) => c.id === d.channel.id)) s.channels.push(d.channel); renderSide(); });
     sock.on("channelUpdated", (d) => { const s = S.servers.find((x) => x.id === d.serverId); if (!s) return; s.channels = s.channels.map((c) => (c.id === d.channel.id ? d.channel : c)); renderAll(); });
     sock.on("channelDeleted", onChannelDeleted);
@@ -149,7 +161,8 @@
     if (S.cid) loadHistory(S.cid);
     renderAll(); initPush();
   }
-  const PERM = { MESSAGES: 1, CHANNELS: 2, ROLES: 4, KICK: 8, VIP: 16 };
+  const PERM = { MESSAGES: 1, CHANNELS: 2, ROLES: 4, KICK: 8, VIP: 16, BAN: 32, MUTE: 64 };
+  const canMod = () => canIn(PERM.KICK) || canIn(PERM.BAN) || canIn(PERM.MUTE);
   function loadRoles(sid) {
     if (sid == null) return;
     S.sock.emit("roles", { serverId: sid }, (r) => {
@@ -198,6 +211,15 @@
     if (V.cid === d.channelId) leaveVoice(true);
     if (S.cid === d.channelId) go("server", s.id, firstText(s)); else renderAll();
   }
+  // Visibilité des salons privés modifiée (rôle, réglage) : on recharge la liste propre à cette personne
+  function refreshChannels(sid) {
+    S.sock.emit("channels", { serverId: sid }, (r) => {
+      const s = S.servers.find((x) => x.id === sid); if (!s || !r || !r.channels) return;
+      s.channels = r.channels;
+      if (V.cid && V.sid === sid && !s.channels.some((c) => c.id === V.cid)) leaveVoice(true);
+      if (S.view === "server" && S.sid === sid && !s.channels.some((c) => c.id === S.cid && c.kind === "text")) go("server", sid, firstText(s)); else renderAll();
+    });
+  }
   function onServerDeleted(d) {
     S.servers = S.servers.filter((s) => s.id !== d.serverId);
     if (V.sid === d.serverId) leaveVoice(true);
@@ -238,7 +260,7 @@
     const box = $("chs"); box.innerHTML = "";
     $("app").classList.toggle("dmview", S.view === "dm");
     if (S.view === "dm") {
-      $("sName").textContent = "Messages privés"; $("bInvite").hidden = true; $("bRoles").hidden = true;
+      $("sName").textContent = "Messages privés"; $("bInvite").hidden = true; $("bRoles").hidden = true; $("bSanc").hidden = true;
       if (!S.dms.length) { box.appendChild(el("div", "emptyside", "Aucune conversation. Cliquez sur un membre d'un serveur, puis sur « Écrire à… » pour lui envoyer un message.")); return; }
       S.dms.forEach((d) => {
         const u = S.unread[d.id] || 0;
@@ -249,7 +271,7 @@
       return;
     }
     const s = server(); if (!s) { $("sName").textContent = ""; return; }
-    $("sName").textContent = s.name; $("bInvite").hidden = false; $("bRoles").hidden = !canIn(PERM.ROLES);
+    $("sName").textContent = s.name; $("bInvite").hidden = false; $("bRoles").hidden = !canIn(PERM.ROLES); $("bSanc").hidden = !canMod();
     const canManage = canIn(PERM.CHANNELS);
     if (canManage) { const a = icText(el("button", "addch"), "plus", "Créer un salon"); a.onclick = channelCreateModal; box.appendChild(a); }
     const cats = []; s.channels.forEach((c) => { if (cats.indexOf(c.category) < 0) cats.push(c.category); });
@@ -258,7 +280,7 @@
       s.channels.filter((c) => c.category === cat).forEach((c) => {
         const row = el("div", "chrow"), voice = c.kind === "voice", u = S.unread[c.id] || 0;
         const b = el("button", "ch" + (!voice && c.id === S.cid ? " on" : "") + (u ? " unread" : ""));
-        { const h = el("span", "hash"); if (voice) h.innerHTML = ic("volume", 18); else h.textContent = "#"; b.appendChild(h); } b.appendChild(el("span", "", c.name));
+        { const h = el("span", "hash"); if (c.private) { h.innerHTML = ic("lock", 16); h.title = "Salon privé"; } else if (voice) h.innerHTML = ic("volume", 18); else h.textContent = "#"; b.appendChild(h); } b.appendChild(el("span", "", c.name));
         if (u && c.id !== S.cid) b.appendChild(el("span", "badge", String(u)));
         else if (c.readonly) b.appendChild(el("span", "lock", "🔒"));
         else if (c.slowmode) { const sl = el("span", "lock", "🐢"); sl.title = "Mode lent"; b.appendChild(sl); }
@@ -304,12 +326,13 @@
   }
   function updateComposer() {
     const c = channel(), inp = $("inp"), box = $("form");
-    const ro = !c || (c.readonly && !privileged());
+    const mutedUntil = c && c.kind !== "dm" ? ((S.roles[c.serverId || S.sid] || {}).mutedUntil || 0) : 0, muted = mutedUntil > Date.now();
+    const ro = !c || (c.readonly && !privileged()) || muted;
     inp.disabled = ro; box.classList.toggle("off", ro); $("bMic").disabled = ro;
     const left = c && S.cool[c.id] ? Math.ceil((S.cool[c.id] - Date.now()) / 1000) : 0;
-    inp.placeholder = !c ? "" : c.readonly && !privileged() ? "Ce salon est en lecture seule." : left > 0 ? "Mode lent : encore " + left + " s" : "Envoyer un message " + (c.kind === "dm" ? "à " + c.name : "dans #" + c.name);
+    inp.placeholder = !c ? "" : muted ? "Vous êtes en sourdine jusqu'à " + WHEN(mutedUntil) + "." : c.readonly && !privileged() ? "Ce salon est en lecture seule." : left > 0 ? "Mode lent : encore " + left + " s" : "Envoyer un message " + (c.kind === "dm" ? "à " + c.name : "dans #" + c.name);
   }
-  setInterval(() => { const c = channel(); if (c && S.cool[c.id]) updateComposer(); }, 500);
+  setInterval(() => { const c = channel(); if (c && (S.cool[c.id] || ((S.roles[S.sid] || {}).mutedUntil || 0))) updateComposer(); }, 500);
 
   /* ---------- Rendu : messages ---------- */
   function richText(box, text) {
@@ -596,16 +619,26 @@
         if (code) S.sock.emit("joinServer", { code }, done); else if (name) S.sock.emit("createServer", { name }, done); else m.error("Saisissez un nom ou un code.");
       } }, { label: "Annuler", ghost: true }] });
   }
+  const WHEN = (t) => new Date(t).toLocaleString("fr-FR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+  // Champs « salon privé » : une case, puis une case par rôle autorisé
+  function privacyFields(c) {
+    const roles = (S.roles[S.sid] || {}).roles || [], on = new Set((c && c.roleIds) || []);
+    const f = [{ id: "p", type: "check", label: "Salon privé : visible seulement par les rôles cochés (et par ceux qui gèrent les salons)", value: !!(c && c.private) }];
+    roles.forEach((r) => f.push({ id: "pr" + r.id, type: "check", label: "   ↳ " + r.name, value: on.has(r.id) }));
+    return { fields: f, read: (m) => ({ private: m.v("p"), roleIds: roles.filter((r) => m.v("pr" + r.id)).map((r) => r.id) }) };
+  }
   function channelCreateModal() {
-    modal({ title: "Créer un salon", fields: [{ id: "n", label: "Nom du salon", ph: "ex. projets", max: 24 }, { id: "k", label: "Type", type: "select", options: [["text", "Salon textuel"], ["voice", "Salon vocal"]], value: "text" }, { id: "t", label: "Description (facultatif)", ph: "À quoi sert ce salon ?", max: 100 }],
-      buttons: [{ label: "Créer", run: (m) => S.sock.emit("createChannel", { serverId: S.sid, name: m.v("n"), topic: m.v("t"), kind: m.v("k") }, (r) => { if (r && r.error) m.error(r.error); else m.close(); }) }, { label: "Annuler", ghost: true }] });
+    const pv = privacyFields(null);
+    modal({ title: "Créer un salon", fields: [{ id: "n", label: "Nom du salon", ph: "ex. projets", max: 24 }, { id: "k", label: "Type", type: "select", options: [["text", "Salon textuel"], ["voice", "Salon vocal"]], value: "text" }, ...pv.fields, { id: "t", label: "Description (facultatif)", ph: "À quoi sert ce salon ?", max: 100 }],
+      buttons: [{ label: "Créer", run: (m) => S.sock.emit("createChannel", { serverId: S.sid, name: m.v("n"), topic: m.v("t"), kind: m.v("k"), ...pv.read(m) }, (r) => { if (r && r.error) m.error(r.error); else m.close(); }) }, { label: "Annuler", ghost: true }] });
   }
   function channelSettingsModal(c) {
     const text = c.kind === "text", fields = [{ id: "t", label: "Description", value: c.topic, max: 100 }];
     if (text) { fields.push({ id: "s", label: "Mode lent (délai entre deux messages)", type: "select", options: SLOW, value: c.slowmode }); fields.push({ id: "r", label: "Lecture seule : seuls le propriétaire et les modérateurs écrivent", type: "check", value: c.readonly }); }
+    const pv = privacyFields(c); fields.push(...pv.fields);
     let armed = false;
     modal({ title: "Réglages de #" + c.name, fields, buttons: [
-      { label: "Enregistrer", run: (m) => S.sock.emit("setChannel", { channelId: c.id, topic: m.v("t"), slowmode: text ? Number(m.v("s")) : 0, readonly: text ? m.v("r") : false }, (r) => { if (r && r.error) m.error(r.error); else m.close(); }) },
+      { label: "Enregistrer", run: (m) => S.sock.emit("setChannel", { channelId: c.id, ...pv.read(m), topic: m.v("t"), slowmode: text ? Number(m.v("s")) : 0, readonly: text ? m.v("r") : false }, (r) => { if (r && r.error) m.error(r.error); else m.close(); }) },
       { label: "Supprimer le salon", danger: true, run: (m, btn) => {
         if (!armed) { armed = true; btn.textContent = "Cliquez encore pour confirmer la suppression"; return; }
         S.sock.emit("deleteChannel", { channelId: c.id }, (r) => { if (r && r.error) { armed = false; btn.textContent = "Supprimer le salon"; m.error(r.error); } else m.close(); });
@@ -633,6 +666,75 @@
     document.body.appendChild(m);
     const r = m.getBoundingClientRect(); m.style.left = Math.max(8, Math.min(ev.clientX, innerWidth - r.width - 8)) + "px"; m.style.top = Math.max(8, Math.min(ev.clientY, innerHeight - r.height - 8)) + "px";
   }
+  /* ---------- Sanctions ---------- */
+  const DURATIONS = { mute: [["10", "10 minutes"], ["60", "1 heure"], ["1440", "1 jour"]], ban: [["1", "1 heure"], ["24", "1 jour"], ["0", "Définitif"]] };
+  const TYPE_LABEL = { warn: "Avertissement", mute: "Sourdine", unmute: "Sourdine levée", kick: "Expulsion", ban: "Bannissement", unban: "Bannissement levé" };
+  function sanctionModal(type, u) {
+    const sid = S.sid, titles = { warn: "Avertir ", mute: "Mettre en sourdine ", kick: "Expulser ", ban: "Bannir " };
+    const subs = { warn: "Le membre reçoit votre message et l'avertissement est conservé dans l'historique.", mute: "Pendant la sourdine, il ne peut ni écrire, ni réagir, ni rejoindre le vocal.", kick: "Il peut revenir avec le code d'invitation. Pour l'en empêcher, utilisez un bannissement.", ban: "Il est retiré du serveur et ne peut plus le rejoindre pendant la durée choisie." };
+    const fields = [];
+    if (DURATIONS[type]) fields.push({ id: "d", label: "Durée", type: "select", options: DURATIONS[type], value: DURATIONS[type][0][0] });
+    fields.push({ id: "r", label: type === "warn" ? "Message d'avertissement" : "Motif (facultatif)", ph: type === "warn" ? "Ce qu'il doit corriger" : "Insultes, spam…", max: 200 });
+    modal({ title: titles[type] + u.name, sub: subs[type], fields, buttons: [
+      { label: { warn: "Envoyer l'avertissement", mute: "Mettre en sourdine", kick: "Expulser", ban: "Bannir" }[type], danger: type === "kick" || type === "ban", run: (m) => {
+        const base = { serverId: sid, userId: u.id, reason: m.v("r") };
+        const p = type === "mute" ? { ...base, minutes: Number(m.v("d")) } : type === "ban" ? { ...base, hours: Number(m.v("d")) || null } : base;
+        S.sock.emit(type, p, (x) => { if (x && x.error) m.error(x.error); else { m.close(); toast(u.name + " : " + ({ warn: "avertissement envoyé", mute: "mis en sourdine", kick: "expulsé", ban: "banni" })[type] + "."); } });
+      } }, { label: "Annuler", ghost: true }] });
+  }
+  function histRows(list, box, withName) {
+    if (!list.length) { box.appendChild(el("p", "rhint", "Aucune sanction enregistrée.")); return; }
+    list.forEach((h) => {
+      const row = el("div", "srow"), top = el("div", "stop");
+      top.appendChild(el("b", "stype t-" + h.type, TYPE_LABEL[h.type] || h.type));
+      if (withName) top.appendChild(el("span", "", " — " + h.user.name));
+      top.appendChild(el("span", "swhen", WHEN(h.ts)));
+      row.appendChild(top);
+      const det = [h.until && (h.type === "mute" ? "jusqu'à " + WHEN(h.until) : "jusqu'au " + WHEN(h.until)), h.type === "ban" && !h.until ? "définitif" : "", h.reason, "par " + h.by].filter(Boolean).join(" · ");
+      row.appendChild(el("div", "sdet", det)); box.appendChild(row);
+    });
+  }
+  function historyModal(u) {
+    S.sock.emit("sanctions", { serverId: S.sid, userId: u.id }, (r) => {
+      if (!r || r.error) return toast((r && r.error) || "Historique indisponible.");
+      const card = el("div", "card scard"); card.setAttribute("role", "dialog"); card.appendChild(el("h2", "", "Sanctions de " + u.name));
+      if (r.mute) card.appendChild(el("p", "rhint", "En sourdine jusqu'à " + WHEN(r.mute.until) + "."));
+      if (r.ban) card.appendChild(el("p", "rhint", "Banni " + (r.ban.until ? "jusqu'au " + WHEN(r.ban.until) : "définitivement") + "."));
+      const box = el("div", "slist"); histRows(r.history, box, false); card.appendChild(box);
+      const bye = el("button", "btn ghost", "Fermer"); bye.type = "button"; card.appendChild(bye);
+      const close = overlay(card); bye.onclick = close;
+    });
+  }
+  function sanctionsPanel() {
+    const sid = S.sid, card = el("div", "card scard"); card.setAttribute("role", "dialog"); card.appendChild(el("h2", "", "Sanctions du serveur"));
+    const tabs = el("div", "stabs"), body = el("div", "slist"); let tab = "now", data = null;
+    const render = () => {
+      body.innerHTML = ""; tabs.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.t === tab));
+      if (!data) { body.appendChild(el("p", "rhint", "Chargement…")); return; }
+      if (tab === "hist") return histRows(data.history, body, true);
+      body.appendChild(el("div", "hd", "Bannis (" + data.bans.length + ")"));
+      if (!data.bans.length) body.appendChild(el("p", "rhint", "Personne n'est banni."));
+      data.bans.forEach((b) => {
+        const row = el("div", "srow"), top = el("div", "stop"); top.appendChild(el("b", "", b.user.name)); top.appendChild(el("span", "swhen", b.until ? "jusqu'au " + WHEN(b.until) : "définitif"));
+        row.appendChild(top); row.appendChild(el("div", "sdet", [b.reason, "par " + b.by].filter(Boolean).join(" · ")));
+        if (canIn(PERM.BAN)) { const un = el("button", "mini", "Lever le bannissement"); un.type = "button"; un.onclick = () => S.sock.emit("unban", { serverId: sid, userId: b.user.id }, (x) => { if (x && x.error) toast(x.error); else load(); }); row.appendChild(un); }
+        body.appendChild(row);
+      });
+      body.appendChild(el("div", "hd", "Sourdines en cours (" + data.mutes.length + ")"));
+      if (!data.mutes.length) body.appendChild(el("p", "rhint", "Personne n'est en sourdine."));
+      data.mutes.forEach((mu) => {
+        const row = el("div", "srow"), top = el("div", "stop"); top.appendChild(el("b", "", mu.user.name)); top.appendChild(el("span", "swhen", "jusqu'à " + WHEN(mu.until)));
+        row.appendChild(top); row.appendChild(el("div", "sdet", [mu.reason, "par " + mu.by].filter(Boolean).join(" · ")));
+        if (canIn(PERM.MUTE)) { const un = el("button", "mini", "Lever la sourdine"); un.type = "button"; un.onclick = () => S.sock.emit("unmute", { serverId: sid, userId: mu.user.id }, (x) => { if (x && x.error) toast(x.error); else load(); }); row.appendChild(un); }
+        body.appendChild(row);
+      });
+    };
+    [["now", "En cours"], ["hist", "Historique"]].forEach(([t, l]) => { const b = el("button", "stab", l); b.type = "button"; b.dataset.t = t; b.onclick = () => { tab = t; render(); }; tabs.appendChild(b); });
+    const load = () => S.sock.emit("sanctions", { serverId: sid }, (r) => { if (!r || r.error) { toast((r && r.error) || "Indisponible."); return; } data = r; render(); });
+    card.append(tabs, body); const bye = el("button", "btn ghost", "Fermer"); bye.type = "button"; card.appendChild(bye);
+    const close = overlay(card); bye.onclick = close; render(); load();
+  }
+  $("bSanc").onclick = sanctionsPanel;
   /* ---------- Rôles ---------- */
   const rankOfMember = (mb) => { const rs = ((S.roles[S.sid] || {}).roles || []); return Math.max(0, ...rs.filter((r) => (mb.roles || []).includes(r.id)).map((r) => r.position)); };
   // Dans le menu d'un membre : attribuer les rôles accessibles, et expulser
@@ -657,14 +759,15 @@
         });
       }
     }
-    if (canIn(PERM.KICK) && u.id !== S.me.id && !higher) {
-      const b = icText(el("button", "danger"), "log-out", "Expulser du serveur");
-      b.onclick = (e) => {
-        e.stopPropagation(); if (!b.dataset.sure) { b.dataset.sure = 1; icText(b, "log-out", "Cliquez encore pour confirmer"); return; }
-        S.sock.emit("kick", { serverId: S.sid, userId: u.id }, (x) => { if (x && x.error) toast(x.error); else toast(u.name + " a été expulsé."); }); closeMenu();
-      };
-      m.appendChild(b);
-    }
+    if (u.id === S.me.id) return;
+    const mod = (flag, icon, label, fn, danger) => { if (!canIn(flag) || higher) return; const b = icText(el("button", danger ? "danger" : ""), icon, label); b.onclick = (e) => { e.stopPropagation(); closeMenu(); fn(); }; m.appendChild(b); };
+    if (canMod() && !higher) m.appendChild(el("div", "hd", "Modération"));
+    mod(PERM.MUTE, "alert", "Avertir…", () => sanctionModal("warn", u));
+    mod(PERM.MUTE, "timer", "Mettre en sourdine…", () => sanctionModal("mute", u));
+    mod(PERM.MUTE, "volume", "Lever la sourdine", () => S.sock.emit("unmute", { serverId: S.sid, userId: u.id }, (x) => toast(x && x.error ? x.error : "Sourdine levée pour " + u.name + ".")));
+    mod(PERM.KICK, "log-out", "Expulser du serveur…", () => sanctionModal("kick", u), true);
+    mod(PERM.BAN, "ban", "Bannir…", () => sanctionModal("ban", u), true);
+    if (canMod() && !higher) { const b = icText(el("button", ""), "history", "Historique des sanctions"); b.onclick = (e) => { e.stopPropagation(); closeMenu(); historyModal(u); }; m.appendChild(b); }
   }
   const PERM_LABELS = [
     [PERM.MESSAGES, "Gérer les messages", "Supprimer et épingler les messages des autres"],
@@ -672,6 +775,8 @@
     [PERM.ROLES, "Gérer les rôles", "Créer des rôles plus bas que le sien et les attribuer"],
     [PERM.KICK, "Expulser des membres", "Retirer quelqu'un du serveur (il peut revenir avec le code)"],
     [PERM.VIP, "Parler partout", "Ignore le mode lent et la lecture seule"],
+    [PERM.BAN, "Bannir des membres", "Bloquer quelqu'un pour une durée ou définitivement, et lever un bannissement"],
+    [PERM.MUTE, "Avertir et mettre en sourdine", "Envoyer un avertissement ou interdire d'écrire pendant un temps"],
   ];
   const SWATCH = ["#99aab5", "#e74c3c", "#e67e22", "#f1c40f", "#2ecc71", "#1abc9c", "#3498db", "#9b59b6", "#e91e63"];
   function rolesModal() {
@@ -718,7 +823,7 @@
         const l3 = el("label", "", "Permissions"); ed.appendChild(l3);
         const checks = PERM_LABELS.map(([flag, name, desc]) => {
           const lab = el("label", "check perm"), cb = el("input"); cb.type = "checkbox"; cb.checked = (r.perms & flag) !== 0;
-          const myPerms = isStaff() || (server() && server().owner === S.me.id) ? 31 : info.perms;
+          const myPerms = isStaff() || (server() && server().owner === S.me.id) ? 127 : info.perms;
           cb.disabled = locked || (myPerms & flag) === 0;
           const tx = el("span"); tx.append(el("b", "", name), el("small", "", desc)); lab.append(cb, tx); ed.appendChild(lab); return [flag, cb];
         });

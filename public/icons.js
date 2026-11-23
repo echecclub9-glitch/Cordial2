@@ -37,6 +37,11 @@
     video: S('<rect x="2.500" y="6" width="13" height="12" rx="2"/><path d="m15.500 10.500 6-3.500v10l-6-3.500"/>'),
     "video-off": S('<path d="M15.500 14.500V8a2 2 0 0 0-2-2H8M2.500 8v8a2 2 0 0 0 2 2h9"/><path d="m15.500 10.500 6-3.500v10l-3-1.700"/><path d="M4 4l16 16"/>'),
     x: S('<path d="M6 6l12 12M18 6 6 18"/>'),
+    lock: S('<rect x="5" y="10.500" width="14" height="10" rx="2"/><path d="M8 10.500V8a4 4 0 0 1 8 0v2.500"/>'),
+    ban: S('<circle cx="12" cy="12" r="9"/><path d="m5.600 5.600 12.800 12.800"/>'),
+    alert: S('<path d="M12 4 2.500 20h19z"/><path d="M12 10v4.500M12 17.500v.01"/>'),
+    timer: S('<circle cx="12" cy="13.500" r="7.500"/><path d="M12 9.500v4l2.500 1.500M9.500 3h5"/>'),
+    history: S('<path d="M4 12a8 8 0 1 0 2.500-5.800L4 8.500"/><path d="M4 4v4.500h4.500M12 8v4.500l3 1.500"/>'),
   };
   window.IC = IC;
   window.ic = (name, size) => (IC[name] ? '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (size ? ' width="' + size + '" height="' + size + '"' : "") + ">" + IC[name] + "</svg>" : "");

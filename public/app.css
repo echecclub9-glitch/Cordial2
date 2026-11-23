@@ -256,3 +256,18 @@ label { display: block; font-size: 12px; font-weight: 700; letter-spacing: .04em
 #vCam.on { background: var(--ok); color: #04210f; } .vu .camic { margin-left: auto; color: var(--ok); } .vu .camic + .live { margin-left: 6px; } .vu .camic .i { width: 15px; height: 15px; }
 .tile.cam { flex: 0 1 260px; } .tile.cam video { max-height: 220px; } .tile.mirror video { transform: scaleX(-1); }
 .vbtns .icn { width: 30px; height: 30px; } .vpanel .vstate { white-space: nowrap; }
+
+/* Sanctions */
+.warnbox{background:rgba(237,66,69,.14);border:1px solid rgba(237,66,69,.45);border-radius:8px;padding:10px 12px;margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.scard{max-width:520px;width:calc(100vw - 32px)}
+.stabs{display:flex;gap:6px;margin:10px 0}
+.stab{flex:1;padding:8px;border-radius:8px;border:1px solid var(--line,rgba(255,255,255,.14));background:transparent;color:inherit;cursor:pointer}
+.stab.on{background:var(--accent);color:#fff;border-color:transparent}
+.slist{max-height:50vh;overflow:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.srow{padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.06)}
+.stop{display:flex;gap:6px;flex-wrap:wrap;align-items:baseline}
+.stop .swhen{margin-left:auto;opacity:.65;font-size:.85em}
+.sdet{opacity:.8;font-size:.9em;overflow-wrap:anywhere;margin-top:2px}
+.srow .mini{margin-top:6px}
+.stype.t-ban,.stype.t-kick{color:#ed4245}.stype.t-warn{color:#faa61a}.stype.t-mute{color:#e6c04a}
+.ch .hash svg{vertical-align:-3px}
